@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { HubClient } from "./client/hub-client.js";
+import { MulticaClient } from "./client/multica-client.js";
 import { registerAgentTool } from "./tools/register.js";
 import { registerListAgentsTool } from "./tools/list-agents.js";
 import { registerSendMessageTool } from "./tools/send-message.js";
@@ -90,6 +91,22 @@ export function createMcpServer(config: McpServerConfig): { server: McpServer; c
 async function main() {
   const hubUrl = process.env.AGENTMESH_HUB_URL;
   const apiKey = process.env.AGENTMESH_API_KEY ?? "";
+
+  // Multica Go backend support
+  const multicaUrl = process.env.MULTICA_API_URL;
+  const multicaToken = process.env.MULTICA_TOKEN;
+  const multicaWorkspace = process.env.MULTICA_WORKSPACE_ID;
+
+  if (multicaUrl) {
+    console.error(`[agentmesh-mcp] Multica mode: ${multicaUrl}`);
+    const multicaClient = new MulticaClient({
+      baseUrl: multicaUrl,
+      token: multicaToken ?? "",
+      workspaceId: multicaWorkspace ?? "",
+    });
+    // Future: register Multica-specific tools (issues, etc.)
+    // For now, both clients coexist
+  }
 
   if (!hubUrl) {
     console.error("[agentmesh-mcp] Error: AGENTMESH_HUB_URL is required");
