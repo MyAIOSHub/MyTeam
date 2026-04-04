@@ -1,9 +1,11 @@
 package middleware
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -19,8 +21,30 @@ func RequireChannelMember(queries *db.Queries) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Check membership - for now just pass through
-			// TODO: implement actual membership check via queries.ListChannelMembers
+			members, err := queries.ListChannelMembers(r.Context(), util.ParseUUID(channelID))
+			if err != nil {
+				next.ServeHTTP(w, r) // fail open for now
+				return
+			}
+
+			isMember := false
+			for _, m := range members {
+				if util.UUIDToString(m.MemberID) == userID {
+					isMember = true
+					break
+				}
+			}
+
+			if !isMember {
+				ch, err := queries.GetChannel(r.Context(), util.ParseUUID(channelID))
+				if err != nil || ch.Visibility != "public" {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusForbidden)
+					json.NewEncoder(w).Encode(map[string]string{"error": "not a channel member"})
+					return
+				}
+			}
+
 			next.ServeHTTP(w, r)
 		})
 	}

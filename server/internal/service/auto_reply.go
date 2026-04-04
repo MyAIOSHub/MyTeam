@@ -3,10 +3,15 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net/http"
+	"os"
+	"strings"
 
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // AutoReplyConfig describes the LLM configuration stored in agent.auto_reply_config.
@@ -84,11 +89,104 @@ func (s *AutoReplyService) replyAsMentionedAgent(ctx context.Context, agentName 
 		"model", cfg.Model,
 	)
 
-	// TODO: implement LLM call
-	// 1. Get channel message history for context
-	// 2. Call LLM (Anthropic or fallback provider)
-	// 3. Create reply message as agent
-	// 4. Publish WS event
+	// 1. Get recent channel messages for context
+	messages, _ := s.Queries.ListChannelMessages(ctx, db.ListChannelMessagesParams{
+		ChannelID: util.ParseUUID(channelID),
+		Limit:     20,
+		Offset:    0,
+	})
 
-	return nil
+	var history strings.Builder
+	for _, m := range messages {
+		history.WriteString(fmt.Sprintf("[%s]: %s\n", util.UUIDToString(m.SenderID), m.Content))
+	}
+
+	// 2. Call LLM
+	apiKey := cfg.LLMApiKey
+	if apiKey == "" {
+		apiKey = os.Getenv("ANTHROPIC_API_KEY")
+	}
+	if apiKey == "" {
+		apiKey = os.Getenv("LLM_API_KEY")
+	}
+
+	replyText := ""
+	if apiKey != "" {
+		endpoint := cfg.LLMEndpoint
+		if endpoint == "" {
+			endpoint = getEnvOr("LLM_ENDPOINT", "https://api.anthropic.com/v1/messages")
+		}
+		model := cfg.Model
+		if model == "" {
+			model = getEnvOr("LLM_MODEL", "claude-sonnet-4-20250514")
+		}
+
+		systemPrompt := fmt.Sprintf("You are %s, an AI agent. Respond naturally based on conversation context. Keep responses concise.", agentName)
+		if cfg.SystemPrompt != "" {
+			systemPrompt = cfg.SystemPrompt
+		}
+
+		body, _ := json.Marshal(map[string]any{
+			"model": model, "max_tokens": 1024,
+			"system": systemPrompt,
+			"messages": []map[string]string{
+				{"role": "user", "content": fmt.Sprintf("Conversation:\n%s\nLatest message from %s: %s\n\nRespond:", history.String(), util.UUIDToString(trigger.SenderID), trigger.Content)},
+			},
+		})
+
+		req, _ := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+
+		if strings.Contains(endpoint, "anthropic") {
+			req.Header.Set("x-api-key", apiKey)
+			req.Header.Set("anthropic-version", "2023-06-01")
+		} else {
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			defer resp.Body.Close()
+			var llmResp map[string]any
+			json.NewDecoder(resp.Body).Decode(&llmResp)
+			// Anthropic format
+			if content, ok := llmResp["content"].([]any); ok && len(content) > 0 {
+				if block, ok := content[0].(map[string]any); ok {
+					replyText, _ = block["text"].(string)
+				}
+			}
+			// OpenAI format
+			if choices, ok := llmResp["choices"].([]any); ok && len(choices) > 0 {
+				if choice, ok := choices[0].(map[string]any); ok {
+					if msg, ok := choice["message"].(map[string]any); ok {
+						replyText, _ = msg["content"].(string)
+					}
+				}
+			}
+		}
+	}
+
+	if replyText == "" {
+		replyText = fmt.Sprintf("Hi! I'm %s. I noticed you mentioned me. How can I help?", agentName)
+	}
+
+	// 3. Send reply as agent
+	_, err = s.Queries.CreateMessage(ctx, db.CreateMessageParams{
+		WorkspaceID: util.ParseUUID(workspaceID),
+		SenderID:    agent.ID,
+		SenderType:  "agent",
+		ChannelID:   util.ParseUUID(channelID),
+		Content:     replyText,
+		ContentType: "text",
+	})
+
+	slog.Info("auto-reply sent", "agent", agentName, "channel", channelID)
+	return err
+}
+
+func getEnvOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }

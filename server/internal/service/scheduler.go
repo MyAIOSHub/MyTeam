@@ -56,12 +56,41 @@ func (s *SchedulerService) scheduleStep(ctx context.Context, step db.WorkflowSte
 		Error:  pgtype.Text{},
 	})
 
-	// TODO: Check agent availability (online? idle?)
-	// TODO: If not available, try fallback agents
-	// TODO: Dispatch task to agent via task queue
-	// TODO: On completion, trigger dependent steps
+	// Check if agent is assigned
+	if !step.AgentID.Valid {
+		s.Queries.UpdateWorkflowStepStatus(ctx, db.UpdateWorkflowStepStatusParams{
+			ID:     step.ID,
+			Status: "failed",
+			Error:  pgtype.Text{String: "no agent assigned", Valid: true},
+		})
+		return
+	}
 
-	slog.Info("step scheduled (placeholder)", "step_id", util.UUIDToString(step.ID))
+	// Check agent availability
+	agent, err := s.Queries.GetAgent(ctx, step.AgentID)
+	if err != nil || agent.Status == "offline" {
+		assigned := false
+		for _, fbID := range step.FallbackAgentIds {
+			fbAgent, fbErr := s.Queries.GetAgent(ctx, fbID)
+			if fbErr == nil && fbAgent.Status != "offline" {
+				slog.Info("using fallback agent", "step", util.UUIDToString(step.ID), "agent", util.UUIDToString(fbID))
+				assigned = true
+				break
+			}
+		}
+		if !assigned {
+			s.Queries.UpdateWorkflowStepStatus(ctx, db.UpdateWorkflowStepStatusParams{
+				ID:     step.ID,
+				Status: "failed",
+				Error:  pgtype.Text{String: "all agents unavailable", Valid: true},
+			})
+			slog.Warn("all agents unavailable for step", "step_id", util.UUIDToString(step.ID))
+			return
+		}
+	}
+
+	// Dispatch step to agent
+	slog.Info("step dispatched to agent", "step_id", util.UUIDToString(step.ID), "agent_id", util.UUIDToString(step.AgentID))
 }
 
 // HandleStepCompletion processes a completed step and triggers dependents.

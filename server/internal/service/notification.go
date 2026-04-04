@@ -1,10 +1,13 @@
 package service
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -38,7 +41,24 @@ func (s *NotificationService) SubscribeToEvents(bus *events.Bus) {
 
 func (s *NotificationService) notifyWorkflowEvent(e events.Event, title string) {
 	go func() {
+		ctx := context.Background()
 		slog.Info("notification", "type", e.Type, "workspace", e.WorkspaceID, "title", title)
-		// TODO: Create inbox item via CreateInboxItem query when recipient info is available
+
+		if e.ActorID != "" && e.WorkspaceID != "" {
+			_, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+				WorkspaceID:   util.ParseUUID(e.WorkspaceID),
+				RecipientType: e.ActorType,
+				RecipientID:   util.ParseUUID(e.ActorID),
+				Type:          "workflow_update",
+				Severity:      "info",
+				Title:         title,
+				Body:          util.StrToText(fmt.Sprintf("Event: %s", e.Type)),
+				ActorType:     util.StrToText(e.ActorType),
+				ActorID:       util.ParseUUID(e.ActorID),
+			})
+			if err != nil {
+				slog.Warn("create notification failed", "error", err)
+			}
+		}
 	}()
 }
