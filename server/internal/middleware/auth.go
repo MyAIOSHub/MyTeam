@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -54,6 +55,16 @@ func Auth(queries *db.Queries) func(http.Handler) http.Handler {
 				go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
 
 				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Layer 3: Static API Key from environment (dev fallback)
+			staticKey := os.Getenv("AGENTMESH_API_KEY")
+			if staticKey != "" && tokenString == staticKey {
+				ctx := context.WithValue(r.Context(), "user_id", "static-user")
+				ctx = context.WithValue(ctx, "auth_type", "static")
+				r.Header.Set("X-User-ID", "static-user")
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 

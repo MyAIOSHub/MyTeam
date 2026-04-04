@@ -166,9 +166,6 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceMember(queries))
 
-			// Listen (long-poll for MCP tools)
-			r.Get("/api/listen", h.Listen)
-
 			// Typing
 			r.Post("/api/typing", h.SendTypingIndicator)
 

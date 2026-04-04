@@ -8,8 +8,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+var messageDedup = util.NewBoundedUUIDSet(2000)
 
 // POST /api/messages
 func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
@@ -78,9 +81,12 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.publish("message:created", workspaceID, "member", senderID, map[string]any{
-		"message": messageToResponse(msg),
-	})
+	// Dedup check for WS broadcast
+	if messageDedup.Add(uuidToString(msg.ID)) {
+		h.publish("message:created", workspaceID, "member", senderID, map[string]any{
+			"message": messageToResponse(msg),
+		})
+	}
 
 	// Check for @mentions and trigger auto-reply
 	if h.AutoReplyService != nil {

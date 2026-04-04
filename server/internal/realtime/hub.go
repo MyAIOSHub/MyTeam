@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -212,6 +213,46 @@ func (h *Hub) SendToUser(userID string, message []byte, excludeWorkspace ...stri
 // Broadcast sends a message to all connected clients (used for daemon events).
 func (h *Hub) Broadcast(message []byte) {
 	h.broadcast <- message
+}
+
+// PushToUser sends a message to all connections of a specific user.
+func (h *Hub) PushToUser(userID string, msg any) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for _, clients := range h.rooms {
+		for client := range clients {
+			if client.userID == userID {
+				select {
+				case client.send <- data:
+				default:
+				}
+			}
+		}
+	}
+}
+
+// PushTyping sends a typing indicator to a workspace.
+func (h *Hub) PushTyping(workspaceID string, payload map[string]any) {
+	data, _ := json.Marshal(map[string]any{"type": "typing", "payload": payload})
+	h.BroadcastToWorkspace(workspaceID, data)
+}
+
+// PushPresence broadcasts agent presence change to a workspace.
+func (h *Hub) PushPresence(workspaceID string, payload map[string]any) {
+	data, _ := json.Marshal(map[string]any{"type": "presence", "payload": payload})
+	h.BroadcastToWorkspace(workspaceID, data)
+}
+
+// PushSessionUpdate sends session state change to a workspace.
+func (h *Hub) PushSessionUpdate(workspaceID string, payload map[string]any) {
+	data, _ := json.Marshal(map[string]any{"type": "session:updated", "payload": payload})
+	h.BroadcastToWorkspace(workspaceID, data)
 }
 
 // HandleWebSocket upgrades an HTTP connection to WebSocket with JWT auth.
