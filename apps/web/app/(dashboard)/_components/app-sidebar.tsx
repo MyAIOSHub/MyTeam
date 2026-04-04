@@ -8,8 +8,10 @@ import {
   Bot,
   Monitor,
   ChevronDown,
+  Search,
   Settings,
   LogOut,
+  User,
   Plus,
   Check,
   BookOpenText,
@@ -53,6 +55,7 @@ const primaryNav = [
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/my-issues", label: "My Issues", icon: CircleUser },
   { href: "/issues", label: "Issues", icon: ListTodo },
+  { href: "/search", label: "Search", icon: Search },
 ];
 
 const communicationNav = [
@@ -67,6 +70,7 @@ const workspaceNav = [
   { href: "/runtimes", label: "Runtimes", icon: Monitor },
   { href: "/skills", label: "Skills", icon: BookOpenText },
   { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/account", label: "Account", icon: User },
 ];
 
 function DraftDot() {
