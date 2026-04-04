@@ -48,6 +48,8 @@ type Agent struct {
 	Tags                    []string           `json:"tags"`
 	AgentMetadata           []byte             `json:"agent_metadata"`
 	TriggerOnChannelMention pgtype.Bool        `json:"trigger_on_channel_mention"`
+	IsSystem                bool               `json:"is_system"`
+	SystemConfig            []byte             `json:"system_config"`
 }
 
 type AgentRuntime struct {
@@ -102,6 +104,8 @@ type Attachment struct {
 	ContentType  string             `json:"content_type"`
 	SizeBytes    int64              `json:"size_bytes"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	Version      int32              `json:"version"`
+	ParentFileID pgtype.UUID        `json:"parent_file_id"`
 }
 
 type Channel struct {

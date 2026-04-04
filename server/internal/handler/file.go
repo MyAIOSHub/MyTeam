@@ -292,6 +292,26 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
+// ListFileVersions — GET /api/files/{id}/versions
+// ---------------------------------------------------------------------------
+
+func (h *Handler) ListFileVersions(w http.ResponseWriter, r *http.Request) {
+	fileID := chi.URLParam(r, "id")
+
+	versions, err := h.Queries.GetFileVersions(r.Context(), parseUUID(fileID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get file versions")
+		return
+	}
+
+	resp := make([]AttachmentResponse, len(versions))
+	for i, a := range versions {
+		resp[i] = h.attachmentToResponse(a)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"versions": resp})
+}
+
+// ---------------------------------------------------------------------------
 // Attachment linking
 // ---------------------------------------------------------------------------
 

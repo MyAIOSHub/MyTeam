@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -191,6 +192,17 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create workspace")
 		return
 	}
+
+	// Auto-create system agent for the new workspace
+	go func() {
+		_, err := h.Queries.CreateSystemAgent(context.Background(), db.CreateSystemAgentParams{
+			WorkspaceID: ws.ID,
+			OwnerID:     parseUUID(userID),
+		})
+		if err != nil {
+			slog.Warn("auto-create system agent failed", "error", err)
+		}
+	}()
 
 	slog.Info("workspace created", append(logger.RequestAttrs(r), "workspace_id", uuidToString(ws.ID), "name", ws.Name, "slug", ws.Slug)...)
 	writeJSON(w, http.StatusCreated, workspaceToResponse(ws))

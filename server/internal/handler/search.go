@@ -24,6 +24,13 @@ func pgTextToString(t pgtype.Text) string {
 	return ""
 }
 
+func truncateStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
+
 // GET /api/search?q=keyword&type=message,issue,agent
 func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
@@ -44,9 +51,23 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	for _, t := range types {
 		switch strings.TrimSpace(t) {
 		case "message":
-			// Search messages by content
-			// TODO: use h.Queries with ILIKE when query is available
-			slog.Debug("searching messages", "q", query, "workspace", workspaceID)
+			channels, _ := h.Queries.ListChannels(r.Context(), parseUUID(workspaceID))
+			for _, ch := range channels {
+				msgs, _ := h.Queries.ListChannelMessages(r.Context(), db.ListChannelMessagesParams{
+					ChannelID: ch.ID, Limit: 20, Offset: 0,
+				})
+				for _, m := range msgs {
+					if strings.Contains(strings.ToLower(m.Content), strings.ToLower(query)) {
+						results = append(results, SearchResult{
+							Type:    "message",
+							ID:      uuidToString(m.ID),
+							Title:   truncateStr(m.Content, 60),
+							Preview: m.Content,
+						})
+					}
+				}
+			}
+			slog.Debug("searched messages", "q", query, "workspace", workspaceID, "found", len(results))
 		case "issue":
 			issues, err := h.Queries.ListIssues(r.Context(), db.ListIssuesParams{
 				WorkspaceID: parseUUID(workspaceID),

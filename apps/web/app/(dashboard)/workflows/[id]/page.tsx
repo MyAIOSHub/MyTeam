@@ -8,6 +8,7 @@ import { api } from "@/shared/api";
 import { toast } from "sonner";
 import { ArrowLeft, Play, Loader2, Trash2 } from "lucide-react";
 import type { Workflow, WorkflowStep } from "@/shared/types/workflow";
+import { WorkflowEditor } from "@/features/workflow/components/workflow-editor";
 
 const statusColor = (status: string) => {
   switch (status) {
@@ -141,29 +142,13 @@ export default function WorkflowDetailPage() {
       {/* Steps */}
       <div className="space-y-2">
         <h2 className="text-lg font-medium mb-3">Steps</h2>
-        {steps.length === 0 ? (
-          <p className="text-muted-foreground text-sm">No steps defined for this workflow.</p>
-        ) : (
-          steps.map((step) => (
-            <div key={step.id} className="flex items-center gap-3 p-4 border rounded-lg">
-              <div className={`w-3 h-3 rounded-full ${statusColor(step.status)}`} />
-              <div className="flex-1">
-                <div className="font-medium">Step {step.step_order}: {step.description}</div>
-                <div className="text-sm text-muted-foreground">
-                  Agent: {step.agent_id || "unassigned"} · Timeout: {step.timeout_ms / 1000}s
-                  {step.required_skills.length > 0 && ` · Skills: ${step.required_skills.join(", ")}`}
-                  {step.depends_on.length > 0 && ` · Depends on: ${step.depends_on.join(", ")}`}
-                </div>
-                {step.error && (
-                  <div className="text-sm text-red-500 mt-1">Error: {step.error}</div>
-                )}
-              </div>
-              <span className={`text-xs px-2 py-0.5 rounded ${statusBadge(step.status)}`}>
-                {step.status}
-              </span>
-            </div>
-          ))
-        )}
+        <WorkflowEditor
+          steps={steps}
+          readOnly={workflow.status === "completed" || workflow.status === "failed"}
+          onAddStep={() => {/* TODO: add step via API */}}
+          onRemoveStep={(stepId) => {/* TODO: remove step */}}
+          onUpdateStep={(stepId, updates) => {/* TODO: update step */}}
+        />
       </div>
     </div>
   );

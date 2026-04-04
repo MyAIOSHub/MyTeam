@@ -191,9 +191,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				})
 			})
 
+			// System Agent
+			r.Get("/api/system-agent", h.GetOrCreateSystemAgent)
+
 			// Attachments
 			r.Get("/api/attachments/{id}", h.GetAttachmentByID)
 			r.Delete("/api/attachments/{id}", h.DeleteAttachment)
+			r.Get("/api/files/{id}/versions", h.ListFileVersions)
 
 			// Comments
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {

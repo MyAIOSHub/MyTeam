@@ -40,3 +40,14 @@ WHERE issue_id = $2
 
 -- name: DeleteAttachment :exec
 DELETE FROM attachment WHERE id = $1 AND workspace_id = $2;
+
+-- name: GetFileVersions :many
+SELECT * FROM attachment WHERE parent_file_id = $1 OR id = $1 ORDER BY version ASC;
+
+-- name: CreateFileVersion :one
+INSERT INTO attachment (workspace_id, issue_id, comment_id, filename, content_type, size_bytes, url, uploader_type, uploader_id, version, parent_file_id)
+VALUES ($1, sqlc.narg(issue_id), sqlc.narg(comment_id), $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING *;
+
+-- name: GetLatestFileVersion :one
+SELECT * FROM attachment WHERE (id = $1 OR parent_file_id = $1) ORDER BY version DESC LIMIT 1;

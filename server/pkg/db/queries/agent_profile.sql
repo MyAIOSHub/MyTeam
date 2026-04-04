@@ -33,3 +33,11 @@ SELECT * FROM agent
 WHERE workspace_id = $1
   AND $2 = ANY(capabilities)
   AND archived_at IS NULL;
+
+-- name: GetSystemAgent :one
+SELECT * FROM agent WHERE workspace_id = $1 AND is_system = TRUE LIMIT 1;
+
+-- name: CreateSystemAgent :one
+INSERT INTO agent (workspace_id, name, description, status, is_system, owner_id, visibility)
+VALUES ($1, 'System Agent', 'Workspace system agent - manages defaults and automation', 'idle', TRUE, $2, 'workspace')
+RETURNING *;
