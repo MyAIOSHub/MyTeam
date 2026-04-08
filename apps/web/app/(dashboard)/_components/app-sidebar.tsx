@@ -83,10 +83,10 @@ export function AppSidebar() {
                     render={
                       <SidebarMenuButton>
                         <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
-                        <span className="flex-1 truncate font-medium text-[#f7f8f8]">
+                        <span className="flex-1 truncate font-medium text-foreground">
                           {workspace?.name ?? "Multica"}
                         </span>
-                        <ChevronDown className="size-3 text-[#8a8f98]" />
+                        <ChevronDown className="size-3 text-muted-foreground" />
                       </SidebarMenuButton>
                     }
                   />
@@ -147,7 +147,7 @@ export function AppSidebar() {
             </SidebarMenu>
             <Tooltip>
               <TooltipTrigger
-                className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-[rgba(255,255,255,0.05)] text-[#d0d6e0] hover:bg-[rgba(255,255,255,0.08)] hover:text-[#f7f8f8]"
+                className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-secondary-foreground hover:bg-muted hover:text-foreground"
                 onClick={() => useModalStore.getState().open("create-issue")}
               >
                 <SquarePen className="size-3.5" />
@@ -170,7 +170,7 @@ export function AppSidebar() {
                       <SidebarMenuButton
                         isActive={isActive}
                         render={<Link href={item.href} />}
-                        className="text-[#d0d6e0] hover:text-[#f7f8f8] hover:not-data-active:bg-[rgba(255,255,255,0.03)] data-active:bg-[rgba(255,255,255,0.05)] data-active:text-[#f7f8f8]"
+                        className="text-secondary-foreground hover:text-foreground hover:not-data-active:bg-accent/50 data-active:bg-accent data-active:text-foreground"
                       >
                         <item.icon />
                         <span>{item.label}</span>
