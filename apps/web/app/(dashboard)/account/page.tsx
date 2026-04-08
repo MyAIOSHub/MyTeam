@@ -8,7 +8,10 @@ export default function AccountPage() {
 
   useEffect(() => {
     fetch("/api/auth/me").then(r => r.json()).then(setUser).catch(() => {})
-    fetch("/api/agents").then(r => r.json()).then(d => setAgents(d.agents ?? d ?? [])).catch(() => {})
+    fetch("/api/agents").then(r => r.json()).then(d => {
+      const list = Array.isArray(d) ? d : Array.isArray(d?.agents) ? d.agents : [];
+      setAgents(list);
+    }).catch(() => {})
     fetch("/api/workspaces").then(r => r.json()).then(d => setWorkspaces(d ?? [])).catch(() => {})
   }, [])
 
