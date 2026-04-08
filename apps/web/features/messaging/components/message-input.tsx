@@ -38,6 +38,7 @@ export function MessageInput({
     const newAttachments: AttachmentPreview[] = [];
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
+      if (!f) continue;
       newAttachments.push({ file: f, name: f.name, size: formatSize(f.size) });
     }
     setAttachments((prev) => [...prev, ...newAttachments]);

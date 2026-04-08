@@ -7,6 +7,9 @@ import RuntimesPage from "@/features/runtimes/components/runtimes-page"
 import SkillsPage from "@/features/skills/components/skills-page"
 import { useWorkspaceStore } from "@/features/workspace"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { api } from "@/shared/api"
+import { toast } from "sonner"
 
 const TAB_VALUES = ["overview", "agents", "runtimes", "skills"] as const
 type TabValue = (typeof TAB_VALUES)[number]
@@ -111,39 +114,224 @@ function OverviewTab() {
 }
 
 // ---------------------------------------------------------------------------
-// Agents Tab — inline agent list
+// Agents Tab — agent list + create
 // ---------------------------------------------------------------------------
 
-function AgentsTab() {
-  const agents = useWorkspaceStore((s) => s.agents)
+function CreateAgentSection() {
+  const [showForm, setShowForm] = useState(false)
+  const [name, setName] = useState("")
+  const [description, setDescription] = useState("")
+  const [method, setMethod] = useState<"web" | "cli" | "api">("web")
+  const [creating, setCreating] = useState(false)
+  const workspace = useWorkspaceStore((s) => s.workspace)
 
-  if (agents.length === 0) {
+  const handleCreate = async () => {
+    if (!name.trim()) return
+    setCreating(true)
+    try {
+      await api.createAgent({
+        name: name.trim(),
+        description: description.trim() || undefined,
+        runtime_id: "",
+        visibility: "private",
+      })
+      toast.success(`Agent "${name}" 创建成功`)
+      setName("")
+      setDescription("")
+      setShowForm(false)
+      // Refresh agents list
+      if (workspace) {
+        const agentsData = await api.listAgents({ workspace_id: workspace.id })
+        const list = Array.isArray(agentsData) ? agentsData : []
+        useWorkspaceStore.setState({ agents: list })
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "创建 Agent 失败")
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  if (!showForm) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-        <p>暂无 Agent</p>
-        <p className="text-sm">前往 Agent 管理页面创建</p>
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Method 1: Web UI */}
+          <button
+            type="button"
+            onClick={() => { setMethod("web"); setShowForm(true) }}
+            className="rounded-lg border-2 border-dashed border-primary/30 hover:border-primary/60 p-4 text-left transition-colors group"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+                <span className="text-lg">🌐</span>
+              </div>
+              <span className="font-medium text-sm">网页创建</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              在此页面填写表单，快速创建一个 Personal Agent
+            </p>
+          </button>
+
+          {/* Method 2: CLI */}
+          <button
+            type="button"
+            onClick={() => { setMethod("cli"); setShowForm(true) }}
+            className="rounded-lg border-2 border-dashed border-muted-foreground/30 hover:border-muted-foreground/60 p-4 text-left transition-colors group"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center group-hover:bg-muted/80 transition-colors">
+                <span className="text-lg">⌨️</span>
+              </div>
+              <span className="font-medium text-sm">命令行注册</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              通过 CLI 启动 daemon，自动注册本地 Agent 运行时
+            </p>
+          </button>
+
+          {/* Method 3: API */}
+          <button
+            type="button"
+            onClick={() => { setMethod("api"); setShowForm(true) }}
+            className="rounded-lg border-2 border-dashed border-muted-foreground/30 hover:border-muted-foreground/60 p-4 text-left transition-colors group"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center group-hover:bg-muted/80 transition-colors">
+                <span className="text-lg">🔗</span>
+              </div>
+              <span className="font-medium text-sm">API 接入</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              使用 Personal Access Token 通过 REST API 注册 Agent
+            </p>
+          </button>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-3 p-4">
-      {agents.map((agent) => (
-        <div key={agent.id} className="rounded-lg border p-4 space-y-2">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-sm font-medium">
-              {agent.name?.[0]?.toUpperCase() ?? "A"}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="font-medium truncate">{agent.name}</div>
-              <div className="text-xs text-muted-foreground truncate">{agent.description || "No description"}</div>
-            </div>
-            <Badge variant={agent.status === "idle" ? "secondary" : agent.status === "working" ? "default" : "outline"}>
-              {agent.status}
-            </Badge>
+    <div className="rounded-lg border bg-muted/30 p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-medium text-sm">
+          {method === "web" && "网页创建 Agent"}
+          {method === "cli" && "命令行注册 Agent"}
+          {method === "api" && "API 接入 Agent"}
+        </h3>
+        <button type="button" onClick={() => setShowForm(false)} className="text-muted-foreground hover:text-foreground text-sm">
+          取消
+        </button>
+      </div>
+
+      {method === "web" && (
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Agent 名称 *</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full px-3 py-2 bg-background border rounded-md text-sm"
+              placeholder="例如：代码助手、测试 Agent"
+            />
           </div>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">描述</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="w-full px-3 py-2 bg-background border rounded-md text-sm resize-none"
+              rows={2}
+              placeholder="描述这个 Agent 的职责和能力"
+            />
+          </div>
+          <Button size="sm" onClick={handleCreate} disabled={creating || !name.trim()}>
+            {creating ? "创建中..." : "创建 Agent"}
+          </Button>
         </div>
-      ))}
+      )}
+
+      {method === "cli" && (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">在终端执行以下命令，启动本地 daemon 并自动注册 Agent 运行时：</p>
+          <div className="space-y-2">
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">1. 登录（首次使用）</p>
+              <code className="block bg-background rounded-md px-3 py-2 text-sm font-mono border">multica login</code>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">2. 启动 daemon（自动检测 Claude Code / Codex 等 CLI）</p>
+              <code className="block bg-background rounded-md px-3 py-2 text-sm font-mono border">multica daemon start</code>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">3. 查看已注册的运行时</p>
+              <code className="block bg-background rounded-md px-3 py-2 text-sm font-mono border">multica config</code>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">daemon 启动后会自动在"运行时"标签页中显示。</p>
+        </div>
+      )}
+
+      {method === "api" && (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">通过 REST API 注册 Agent，适用于自定义集成场景：</p>
+          <div className="space-y-2">
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">1. 创建 Personal Access Token（设置 → Token 管理）</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">2. 调用 API 创建 Agent</p>
+              <pre className="bg-background rounded-md px-3 py-2 text-xs font-mono border overflow-x-auto whitespace-pre">{`curl -X POST /api/agents \\
+  -H "Authorization: Bearer <your-token>" \\
+  -H "X-Workspace-ID: <workspace-id>" \\
+  -H "Content-Type: application/json" \\
+  -d '{"name": "my-agent", "runtime_id": ""}'`}</pre>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            API 文档请参考项目 README 或 <code className="bg-muted px-1 rounded">server/cmd/server/router.go</code> 中的路由定义。
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AgentsTab() {
+  const agents = useWorkspaceStore((s) => s.agents)
+  const agentList = Array.isArray(agents) ? agents : []
+
+  return (
+    <div className="space-y-4 p-4">
+      {/* Create section always visible */}
+      <CreateAgentSection />
+
+      {/* Agent list */}
+      {agentList.length > 0 && (
+        <>
+          <div className="border-t pt-4">
+            <h3 className="text-sm font-medium text-muted-foreground mb-3">已创建的 Agent ({agentList.length})</h3>
+          </div>
+          <div className="space-y-3">
+            {agentList.map((agent) => (
+              <div key={agent.id} className="rounded-lg border p-4 space-y-2">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-sm font-medium">
+                    {agent.name?.[0]?.toUpperCase() ?? "A"}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium truncate">{agent.name}</div>
+                    <div className="text-xs text-muted-foreground truncate">{agent.description || "暂无描述"}</div>
+                  </div>
+                  <Badge variant={agent.status === "idle" ? "secondary" : agent.status === "working" ? "default" : "outline"}>
+                    {agent.status}
+                  </Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
