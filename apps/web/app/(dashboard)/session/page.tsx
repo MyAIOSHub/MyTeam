@@ -32,7 +32,7 @@ type SelectionType = "dm" | "channel";
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "just now";
+  if (minutes < 1) return "刚刚";
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h`;
@@ -71,7 +71,7 @@ function SessionSidebar({
       <div className="flex-none overflow-auto max-h-[40%] px-1">
         {conversations.length === 0 ? (
           <div className="px-3 py-2 text-xs text-[#8a8f98]">
-            No conversations
+            暂无对话
           </div>
         ) : (
           conversations.map((conv) => (
@@ -114,7 +114,7 @@ function SessionSidebar({
       <div className="flex-1 overflow-auto px-1 min-h-0">
         {channels.length === 0 ? (
           <div className="px-3 py-2 text-xs text-[#8a8f98]">
-            No channels
+            暂无频道
           </div>
         ) : (
           channels.map((ch) => (
@@ -156,7 +156,7 @@ function InboxPanel({
       await api.archiveInbox(id);
       useInboxStore.getState().archive(id);
     } catch {
-      toast.error("Failed to archive");
+      toast.error("归档失败");
     }
   };
 
@@ -168,18 +168,18 @@ function InboxPanel({
           onClick={onClose}
           className="text-xs text-[#8a8f98] hover:text-[#f7f8f8]"
         >
-          Close
+          关闭
         </button>
       </div>
       <div className="flex-1 overflow-auto min-h-0">
         {loading ? (
           <div className="p-4 text-sm text-[#8a8f98] text-center">
-            Loading...
+            加载中...
           </div>
         ) : items.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-[#8a8f98]">
             <Inbox className="mb-2 h-6 w-6 text-[#62666d]" />
-            <p className="text-xs">No notifications</p>
+            <p className="text-xs">暂无通知</p>
           </div>
         ) : (
           items.map((item) => (
@@ -346,7 +346,7 @@ export default function SessionPage() {
         });
         setChannelMessages((prev) => [...prev, msg]);
       } catch {
-        toast.error("Failed to send message");
+        toast.error("发送消息失败");
       }
     },
     [selectedId],
@@ -364,7 +364,7 @@ export default function SessionPage() {
         : "";
   const headerSub =
     selectedType === "channel" && channelMembers.length > 0
-      ? `${channelMembers.length} member${channelMembers.length !== 1 ? "s" : ""}`
+      ? `${channelMembers.length} 位成员`
       : selectedType === "dm"
         ? conversations.find((c) => c.peer_id === selectedId)?.peer_type ?? ""
         : "";
@@ -434,8 +434,8 @@ export default function SessionPage() {
               }
               placeholder={
                 selectedType === "dm"
-                  ? "Type a message..."
-                  : `Message #${currentChannel?.name ?? "channel"}...`
+                  ? "输入消息..."
+                  : `发送消息到 #${currentChannel?.name ?? "频道"}...`
               }
             />
           </>

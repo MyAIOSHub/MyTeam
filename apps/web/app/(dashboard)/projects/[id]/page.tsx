@@ -193,7 +193,7 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
       useIssueStore.getState().updateIssue(issueId, updates);
 
       api.updateIssue(issueId, updates).catch(() => {
-        toast.error("Failed to move issue");
+        toast.error("移动任务失败");
         api
           .listIssues({ limit: 200 })
           .then((res) => {
@@ -591,8 +591,8 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
             {scopedIssues.length === 0 ? (
               <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
                 <ListTodo className="h-10 w-10 text-muted-foreground/40" />
-                <p className="text-sm">No issues yet</p>
-                <p className="text-xs">Create an issue to get started.</p>
+                <p className="text-sm">暂无任务</p>
+                <p className="text-xs">创建一个任务以开始。</p>
               </div>
             ) : (
               <ListView
@@ -611,8 +611,8 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
             {scopedIssues.length === 0 ? (
               <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
                 <ListTodo className="h-10 w-10 text-muted-foreground/40" />
-                <p className="text-sm">No issues yet</p>
-                <p className="text-xs">Create an issue to get started.</p>
+                <p className="text-sm">暂无任务</p>
+                <p className="text-xs">创建一个任务以开始。</p>
               </div>
             ) : (
               <BoardView

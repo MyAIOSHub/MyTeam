@@ -194,8 +194,8 @@ export function MembersTab() {
   const handleRemoveMember = (member: MemberWithUser) => {
     if (!workspace) return;
     setConfirmAction({
-      title: `Remove ${member.name}`,
-      description: `Remove ${member.name} from ${workspace.name}? They will lose access to this workspace.`,
+      title: `移除 ${member.name}`,
+      description: `从 ${workspace.name} 中移除 ${member.name}？该成员将失去对此工作区的访问权限。`,
       variant: "destructive",
       onConfirm: async () => {
         setMemberActionId(member.id);
@@ -219,7 +219,7 @@ export function MembersTab() {
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <Users className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">Members ({members.length})</h2>
+          <h2 className="text-sm font-semibold">成员 ({members.length})</h2>
         </div>
 
         {canManageWorkspace && (
@@ -227,7 +227,7 @@ export function MembersTab() {
             <CardContent className="space-y-3">
               <div className="flex items-center gap-2">
                 <Plus className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-sm font-medium">Add member</h3>
+                <h3 className="text-sm font-medium">添加成员</h3>
               </div>
               <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
                 <Input
@@ -239,9 +239,9 @@ export function MembersTab() {
                 <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>
                   <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="member">Member</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    {isOwner && <SelectItem value="owner">Owner</SelectItem>}
+                    <SelectItem value="member">成员</SelectItem>
+                    <SelectItem value="admin">管理员</SelectItem>
+                    {isOwner && <SelectItem value="owner">所有者</SelectItem>}
                   </SelectContent>
                 </Select>
                 <Button
@@ -272,7 +272,7 @@ export function MembersTab() {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">No members found.</p>
+          <p className="text-sm text-muted-foreground">暂无成员。</p>
         )}
       </section>
 
@@ -283,7 +283,7 @@ export function MembersTab() {
             <AlertDialogDescription>{confirmAction?.description}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
               variant={confirmAction?.variant === "destructive" ? "destructive" : "default"}
               onClick={async () => {

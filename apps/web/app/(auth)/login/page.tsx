@@ -111,7 +111,7 @@ function LoginPageContent() {
   const handleSendCode = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!email) {
-      setError("Email is required");
+      setError("请输入邮箱地址");
       return;
     }
     setError("");
@@ -125,7 +125,7 @@ function LoginPageContent() {
       setError(
         err instanceof Error
           ? err.message
-          : "Failed to send code. Make sure the server is running."
+          : "发送验证码失败，请确保服务器正在运行。"
       );
     } finally {
       setSubmitting(false);
@@ -141,7 +141,7 @@ function LoginPageContent() {
         const cliCallback = searchParams.get("cli_callback");
         if (cliCallback) {
           if (!validateCliCallback(cliCallback)) {
-            setError("Invalid callback URL");
+            setError("无效的回调地址");
             setSubmitting(false);
             return;
           }
@@ -157,7 +157,7 @@ function LoginPageContent() {
         router.push(searchParams.get("next") || "/issues");
       } catch (err) {
         setError(
-          err instanceof Error ? err.message : "Invalid or expired code"
+          err instanceof Error ? err.message : "验证码无效或已过期"
         );
         setCode("");
         setSubmitting(false);
@@ -174,7 +174,7 @@ function LoginPageContent() {
       setCooldown(10);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to resend code"
+        err instanceof Error ? err.message : "重新发送验证码失败"
       );
     }
   };
@@ -185,13 +185,13 @@ function LoginPageContent() {
       <div className="flex min-h-screen items-center justify-center bg-[#08090a]">
         <Card className="w-full max-w-sm bg-[#0f1011] border-[rgba(255,255,255,0.08)] rounded-xl">
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl text-[#f7f8f8]">Authorize CLI</CardTitle>
+            <CardTitle className="text-2xl text-[#f7f8f8]">授权 CLI</CardTitle>
             <CardDescription className="text-[#8a8f98]">
-              Allow the CLI to access Multica as{" "}
+              允许 CLI 以{" "}
               <span className="font-medium text-[#f7f8f8]">
                 {existingUser.email}
-              </span>
-              ?
+              </span>{" "}
+              的身份访问 Multica？
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
@@ -201,7 +201,7 @@ function LoginPageContent() {
               className="w-full bg-[#5e6ad2] hover:bg-[#828fff] text-white border-0"
               size="lg"
             >
-              {submitting ? "Authorizing..." : "Authorize"}
+              {submitting ? "授权中..." : "授权"}
             </Button>
             <Button
               variant="ghost"
@@ -211,7 +211,7 @@ function LoginPageContent() {
                 setStep("email");
               }}
             >
-              Use a different account
+              使用其他账户
             </Button>
           </CardContent>
         </Card>
@@ -224,9 +224,9 @@ function LoginPageContent() {
       <div className="flex min-h-screen items-center justify-center bg-[#08090a]">
         <Card className="w-full max-w-sm bg-[#0f1011] border-[rgba(255,255,255,0.08)] rounded-xl">
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl text-[#f7f8f8]">Check your email</CardTitle>
+            <CardTitle className="text-2xl text-[#f7f8f8]">查看你的邮箱</CardTitle>
             <CardDescription className="text-[#8a8f98]">
-              We sent a verification code to{" "}
+              我们已将验证码发送至{" "}
               <span className="font-medium text-[#f7f8f8]">{email}</span>
             </CardDescription>
           </CardHeader>
@@ -259,7 +259,7 @@ function LoginPageContent() {
                 disabled={cooldown > 0}
                 className="text-[#7170ff] underline-offset-4 hover:underline disabled:text-[#8a8f98] disabled:no-underline disabled:cursor-not-allowed"
               >
-                {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend code"}
+                {cooldown > 0 ? `${cooldown}秒后重新发送` : "重新发送验证码"}
               </button>
             </div>
           </CardContent>
@@ -273,7 +273,7 @@ function LoginPageContent() {
                 setError("");
               }}
             >
-              Back
+              返回
             </Button>
           </CardFooter>
         </Card>
@@ -286,12 +286,12 @@ function LoginPageContent() {
       <Card className="w-full max-w-sm bg-[#0f1011] border-[rgba(255,255,255,0.08)] rounded-xl">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl font-bold text-[#f7f8f8]">My Team</CardTitle>
-          <CardDescription className="text-[#8a8f98]">Turn coding agents into real teammates</CardDescription>
+          <CardDescription className="text-[#8a8f98]">让编程 Agent 成为真正的队友</CardDescription>
         </CardHeader>
         <CardContent>
           <form id="login-form" onSubmit={handleSendCode} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-[#d0d6e0]">Email</Label>
+              <Label htmlFor="email" className="text-[#d0d6e0]">邮箱</Label>
               <Input
                 id="email"
                 type="email"
@@ -315,7 +315,7 @@ function LoginPageContent() {
             className="w-full bg-[#5e6ad2] hover:bg-[#828fff] text-white border-0"
             size="lg"
           >
-            {submitting ? "Sending code..." : "Continue"}
+            {submitting ? "发送验证码中..." : "继续"}
           </Button>
         </CardFooter>
       </Card>

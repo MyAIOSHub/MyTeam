@@ -90,7 +90,7 @@ export function AppearanceTab() {
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Theme</h2>
+        <h2 className="text-sm font-semibold">主题</h2>
         <div className="flex gap-6" role="radiogroup" aria-label="主题">
           {themeOptions.map((opt) => {
             const active = theme === opt.value;

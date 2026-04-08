@@ -24,7 +24,7 @@ export function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
 
   const slugError =
     slug.length > 0 && !SLUG_REGEX.test(slug)
-      ? "Only lowercase letters, numbers, and hyphens"
+      ? "仅限小写字母、数字和连字符"
       : null;
 
   const canSubmit = name.trim().length > 0 && slug.trim().length > 0 && !slugError;
@@ -71,34 +71,33 @@ export function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
           onClick={onClose}
         >
           <ArrowLeft className="h-4 w-4" />
-          Back
+          返回
         </Button>
 
         <div className="flex w-full max-w-md flex-col items-center gap-6">
           <div className="text-center">
             <DialogTitle className="text-2xl font-semibold">
-              Create a new workspace
+              创建新工作区
             </DialogTitle>
             <DialogDescription className="mt-2">
-              Workspaces are shared environments where teams can work on
-              projects and issues.
+              工作区是团队协作处理项目和任务的共享环境。
             </DialogDescription>
           </div>
 
           <Card className="w-full">
             <CardContent className="space-y-4 pt-6">
               <div className="space-y-1.5">
-                <Label>Workspace Name</Label>
+                <Label>工作区名称</Label>
                 <Input
                   autoFocus
                   type="text"
                   value={name}
                   onChange={(e) => handleNameChange(e.target.value)}
-                  placeholder="My Workspace"
+                  placeholder="我的工作区"
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>Workspace URL</Label>
+                <Label>工作区 URL</Label>
                 <div className="flex items-center gap-0 rounded-md border bg-background focus-within:ring-2 focus-within:ring-ring">
                   <span className="pl-3 text-sm text-muted-foreground select-none">
                     multica.app/
@@ -107,7 +106,7 @@ export function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
                     type="text"
                     value={slug}
                     onChange={(e) => setSlug(e.target.value)}
-                    placeholder="my-workspace"
+                    placeholder="my-workspace（工作区标识）"
                     className="border-0 shadow-none focus-visible:ring-0"
                   />
                 </div>

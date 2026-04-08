@@ -56,7 +56,7 @@ const statusConfig: Record<
   { label: string; icon: typeof Loader2; color: string }
 > = {
   pending: {
-    label: "Waiting for daemon...",
+    label: "等待守护进程...",
     icon: Loader2,
     color: "text-muted-foreground",
   },
@@ -66,11 +66,11 @@ const statusConfig: Record<
     color: "text-info",
   },
   completed: {
-    label: "Update complete. Daemon is restarting...",
+    label: "更新完成，守护进程正在重启...",
     icon: CheckCircle2,
     color: "text-success",
   },
-  failed: { label: "Update failed", icon: XCircle, color: "text-destructive" },
+  failed: { label: "更新失败", icon: XCircle, color: "text-destructive" },
   timeout: { label: "超时", icon: XCircle, color: "text-warning" },
 };
 
@@ -143,7 +143,7 @@ export function UpdateSection({
       }, 2000);
     } catch {
       setStatus("failed");
-      setError("Failed to initiate update");
+      setError("启动更新失败");
       setUpdating(false);
     }
   };
@@ -160,15 +160,15 @@ export function UpdateSection({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs text-muted-foreground">CLI Version:</span>
+        <span className="text-xs text-muted-foreground">CLI 版本：</span>
         <span className="text-xs font-mono">
-          {currentVersion ?? "unknown"}
+          {currentVersion ?? "未知"}
         </span>
 
         {!hasUpdate && currentVersion && latestVersion && !status && (
           <span className="inline-flex items-center gap-1 text-xs text-success">
             <Check className="h-3 w-3" />
-            Latest
+            最新
           </span>
         )}
 
@@ -178,7 +178,7 @@ export function UpdateSection({
             <span className="text-xs font-mono text-info">
               {latestVersion}
             </span>
-            <span className="text-xs text-muted-foreground">available</span>
+            <span className="text-xs text-muted-foreground">可用</span>
           </>
         )}
 
@@ -190,7 +190,7 @@ export function UpdateSection({
             disabled={updating}
           >
             <ArrowUpCircle className="h-3 w-3" />
-            Update
+            更新
           </Button>
         )}
 
@@ -220,7 +220,7 @@ export function UpdateSection({
               className="mt-1"
               onClick={handleUpdate}
             >
-              Retry
+              重试
             </Button>
           )}
         </div>

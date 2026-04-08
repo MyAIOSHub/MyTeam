@@ -58,23 +58,23 @@ export default function FilesPage() {
   return (
     <div className="p-6 bg-background min-h-full">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Files ({files.length})</h1>
+        <h1 className="text-2xl font-bold text-foreground">文件 ({files.length})</h1>
         <div>
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleUpload} />
           <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
             className="px-4 py-2 bg-brand text-brand-foreground rounded-md text-sm disabled:opacity-50 hover:opacity-90 transition-opacity">
-            {uploading ? "Uploading..." : "Upload File"}
+            {uploading ? "上传中..." : "上传文件"}
           </button>
         </div>
       </div>
 
-      {loading && <div className="text-muted-foreground">Loading...</div>}
+      {loading && <div className="text-muted-foreground">加载中...</div>}
 
       {!loading && files.length === 0 && (
         <div className="text-center py-16 text-[#8a8f98]">
           <div className="text-4xl mb-3">📁</div>
-          <p className="font-medium text-[#d0d6e0]">No files yet</p>
-          <p className="text-sm mt-1">Files shared in channels, tasks, and uploads will appear here.</p>
+          <p className="font-medium text-[#d0d6e0]">暂无文件</p>
+          <p className="text-sm mt-1">在频道、任务中分享的文件和上传的文件将显示在此处。</p>
         </div>
       )}
 
@@ -93,7 +93,7 @@ export default function FilesPage() {
             </span>
             <a href={f.url} target="_blank" rel="noopener noreferrer"
               className="px-3 py-1 text-sm rounded border border-[rgba(255,255,255,0.08)] text-[#d0d6e0] hover:bg-[rgba(255,255,255,0.05)] transition-colors">
-              Download
+              下载
             </a>
           </div>
         ))}

@@ -62,9 +62,9 @@ export function WorkspaceTab() {
         context,
       });
       updateWorkspace(updated);
-      toast.success("Workspace settings saved");
+      toast.success("工作区设置已保存");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save workspace settings");
+      toast.error(e instanceof Error ? e.message : "保存工作区设置失败");
     } finally {
       setSaving(false);
     }
@@ -73,15 +73,15 @@ export function WorkspaceTab() {
   const handleLeaveWorkspace = () => {
     if (!workspace) return;
     setConfirmAction({
-      title: "Leave workspace",
-      description: `Leave ${workspace.name}? You will lose access until re-invited.`,
+      title: "离开工作区",
+      description: `离开 ${workspace.name}？你将失去访问权限，需要重新被邀请。`,
       variant: "destructive",
       onConfirm: async () => {
         setActionId("leave");
         try {
           await leaveWorkspace(workspace.id);
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : "Failed to leave workspace");
+          toast.error(e instanceof Error ? e.message : "离开工作区失败");
         } finally {
           setActionId(null);
         }
@@ -92,15 +92,15 @@ export function WorkspaceTab() {
   const handleDeleteWorkspace = () => {
     if (!workspace) return;
     setConfirmAction({
-      title: "Delete workspace",
-      description: `Delete ${workspace.name}? This cannot be undone. All issues, agents, and data will be permanently removed.`,
+      title: "删除工作区",
+      description: `删除 ${workspace.name}？此操作不可撤销。所有任务、Agent 和数据将被永久删除。`,
       variant: "destructive",
       onConfirm: async () => {
         setActionId("delete-workspace");
         try {
           await deleteWorkspace(workspace.id);
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : "Failed to delete workspace");
+          toast.error(e instanceof Error ? e.message : "删除工作区失败");
         } finally {
           setActionId(null);
         }
@@ -114,12 +114,12 @@ export function WorkspaceTab() {
     <div className="space-y-8">
       {/* Workspace settings */}
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">General</h2>
+        <h2 className="text-sm font-semibold">通用</h2>
 
         <Card>
           <CardContent className="space-y-3">
             <div>
-              <Label className="text-xs text-muted-foreground">Name</Label>
+              <Label className="text-xs text-muted-foreground">名称</Label>
               <Input
                 type="text"
                 value={name}
@@ -129,25 +129,25 @@ export function WorkspaceTab() {
               />
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">Description</Label>
+              <Label className="text-xs text-muted-foreground">描述</Label>
               <Textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
                 disabled={!canManageWorkspace}
                 className="mt-1 resize-none"
-                placeholder="What does this workspace focus on?"
+                placeholder="这个工作区专注于什么？"
               />
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">Context</Label>
+              <Label className="text-xs text-muted-foreground">上下文</Label>
               <Textarea
                 value={context}
                 onChange={(e) => setContext(e.target.value)}
                 rows={4}
                 disabled={!canManageWorkspace}
                 className="mt-1 resize-none"
-                placeholder="Background information and context for AI agents working in this workspace"
+                placeholder="为在此工作区工作的 AI Agent 提供的背景信息和上下文"
               />
             </div>
             <div>
@@ -164,12 +164,12 @@ export function WorkspaceTab() {
                 className="bg-brand text-brand-foreground hover:opacity-90"
               >
                 <Save className="h-3 w-3" />
-                {saving ? "Saving..." : "Save"}
+                {saving ? "保存中..." : "保存"}
               </Button>
             </div>
             {!canManageWorkspace && (
               <p className="text-xs text-muted-foreground">
-                Only admins and owners can update workspace settings.
+                仅管理员和所有者可以更新工作区设置。
               </p>
             )}
           </CardContent>
@@ -180,16 +180,16 @@ export function WorkspaceTab() {
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <LogOut className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">Danger Zone</h2>
+          <h2 className="text-sm font-semibold">危险操作</h2>
         </div>
 
         <Card>
           <CardContent className="space-y-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-sm font-medium">Leave workspace</p>
+                <p className="text-sm font-medium">离开工作区</p>
                 <p className="text-xs text-muted-foreground">
-                  Remove yourself from this workspace.
+                  将自己从此工作区移除。
                 </p>
               </div>
               <Button
@@ -198,16 +198,16 @@ export function WorkspaceTab() {
                 onClick={handleLeaveWorkspace}
                 disabled={actionId === "leave"}
               >
-                {actionId === "leave" ? "Leaving..." : "Leave workspace"}
+                {actionId === "leave" ? "离开中..." : "离开工作区"}
               </Button>
             </div>
 
             {isOwner && (
               <div className="flex flex-col gap-2 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-sm font-medium text-destructive">Delete workspace</p>
+                  <p className="text-sm font-medium text-destructive">删除工作区</p>
                   <p className="text-xs text-muted-foreground">
-                    Permanently delete this workspace and its data.
+                    永久删除此工作区及其所有数据。
                   </p>
                 </div>
                 <Button
@@ -216,7 +216,7 @@ export function WorkspaceTab() {
                   onClick={handleDeleteWorkspace}
                   disabled={actionId === "delete-workspace"}
                 >
-                  {actionId === "delete-workspace" ? "Deleting..." : "Delete workspace"}
+                  {actionId === "delete-workspace" ? "删除中..." : "删除工作区"}
                 </Button>
               </div>
             )}
@@ -231,7 +231,7 @@ export function WorkspaceTab() {
             <AlertDialogDescription>{confirmAction?.description}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
               variant={confirmAction?.variant === "destructive" ? "destructive" : "default"}
               onClick={async () => {
@@ -239,7 +239,7 @@ export function WorkspaceTab() {
                 setConfirmAction(null);
               }}
             >
-              Confirm
+              确认
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

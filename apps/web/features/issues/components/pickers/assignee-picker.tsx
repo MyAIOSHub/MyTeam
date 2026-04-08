@@ -65,7 +65,7 @@ export function AssigneePicker({
   const triggerLabel =
     assigneeType && assigneeId
       ? getActorName(assigneeType, assigneeId)
-      : "Unassigned";
+      : "未分配";
 
   return (
     <PropertyPicker
@@ -77,7 +77,7 @@ export function AssigneePicker({
       width="w-52"
       align={align}
       searchable
-      searchPlaceholder="Assign to..."
+      searchPlaceholder="分配给..."
       onSearchChange={setFilter}
       triggerRender={triggerRender}
       trigger={
@@ -87,7 +87,7 @@ export function AssigneePicker({
             <span className="truncate">{triggerLabel}</span>
           </>
         ) : (
-          <span className="text-muted-foreground">Unassigned</span>
+          <span className="text-muted-foreground">未分配</span>
         )
       }
     >
@@ -100,12 +100,12 @@ export function AssigneePicker({
         }}
       >
         <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-muted-foreground">Unassigned</span>
+        <span className="text-muted-foreground">未分配</span>
       </PickerItem>
 
       {/* Members */}
       {filteredMembers.length > 0 && (
-        <PickerSection label="Members">
+        <PickerSection label="成员">
           {filteredMembers.map((m) => (
             <PickerItem
               key={m.user_id}

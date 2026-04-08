@@ -33,9 +33,9 @@ export function RepositoriesTab() {
     try {
       const updated = await api.updateWorkspace(workspace.id, { repos });
       updateWorkspace(updated);
-      toast.success("Repositories saved");
+      toast.success("仓库已保存");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save repositories");
+      toast.error(e instanceof Error ? e.message : "保存仓库失败");
     } finally {
       setSaving(false);
     }
@@ -58,12 +58,12 @@ export function RepositoriesTab() {
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Repositories</h2>
+        <h2 className="text-sm font-semibold">代码仓库</h2>
 
         <Card>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              GitHub repositories associated with this workspace. Agents use these to clone and work on code.
+              与此工作区关联的 GitHub 仓库。Agent 使用这些仓库来克隆和处理代码。
             </p>
 
             {repos.map((repo, index) => (
@@ -82,7 +82,7 @@ export function RepositoriesTab() {
                     value={repo.description}
                     onChange={(e) => handleRepoChange(index, "description", e.target.value)}
                     disabled={!canManageWorkspace}
-                    placeholder="Description (e.g. Go backend + Next.js frontend)"
+                    placeholder="描述（例如 Go 后端 + Next.js 前端）"
                     className="text-sm"
                   />
                 </div>
@@ -103,7 +103,7 @@ export function RepositoriesTab() {
               <div className="flex items-center justify-between pt-1">
                 <Button variant="outline" size="sm" onClick={handleAddRepo}>
                   <Plus className="h-3 w-3" />
-                  Add repository
+                  添加仓库
                 </Button>
                 <Button
                   size="sm"
@@ -112,14 +112,14 @@ export function RepositoriesTab() {
                   className="bg-brand text-brand-foreground hover:opacity-90"
                 >
                   <Save className="h-3 w-3" />
-                  {saving ? "Saving..." : "Save"}
+                  {saving ? "保存中..." : "保存"}
                 </Button>
               </div>
             )}
 
             {!canManageWorkspace && (
               <p className="text-xs text-muted-foreground">
-                Only admins and owners can manage repositories.
+                仅管理员和所有者可以管理仓库。
               </p>
             )}
           </CardContent>

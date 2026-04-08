@@ -62,7 +62,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         {runtime.runtime_mode === "local" && (
           <div>
             <h3 className="text-xs font-medium text-muted-foreground mb-3">
-              CLI Version
+              CLI 版本
             </h3>
             <UpdateSection
               runtimeId={runtime.id}
@@ -75,7 +75,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         {/* Connection Test */}
         <div>
           <h3 className="text-xs font-medium text-muted-foreground mb-3">
-            Connection Test
+            连接测试
           </h3>
           <PingSection runtimeId={runtime.id} />
         </div>
@@ -83,7 +83,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         {/* Usage */}
         <div>
           <h3 className="text-xs font-medium text-muted-foreground mb-3">
-            Token Usage
+            Token 用量
           </h3>
           <UsageSection runtimeId={runtime.id} />
         </div>
@@ -92,7 +92,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         {runtime.metadata && Object.keys(runtime.metadata).length > 0 && (
           <div>
             <h3 className="text-xs font-medium text-muted-foreground mb-2">
-              Metadata
+              元数据
             </h3>
             <div className="rounded-lg border bg-muted/30 p-3">
               <pre className="text-xs font-mono whitespace-pre-wrap break-all">
@@ -105,11 +105,11 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         {/* Timestamps */}
         <div className="grid grid-cols-2 gap-4 border-t pt-4">
           <InfoField
-            label="我创建的"
+            label="创建时间"
             value={new Date(runtime.created_at).toLocaleString()}
           />
           <InfoField
-            label="Updated"
+            label="更新时间"
             value={new Date(runtime.updated_at).toLocaleString()}
           />
         </div>

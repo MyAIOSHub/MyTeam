@@ -43,11 +43,11 @@ import { useWorkspaceStore } from "@/features/workspace";
 import { useModalStore } from "@/features/modals";
 
 const navItems = [
-  { href: "/session", label: "Session", icon: MessageSquare },
-  { href: "/projects", label: "Projects", icon: FolderGit2 },
-  { href: "/files", label: "Files", icon: FileText },
-  { href: "/account", label: "Account", icon: User },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/session", label: "会话", icon: MessageSquare },
+  { href: "/projects", label: "项目", icon: FolderGit2 },
+  { href: "/files", label: "文件", icon: FileText },
+  { href: "/account", label: "身份", icon: User },
+  { href: "/settings", label: "设置", icon: Settings },
 ];
 
 function DraftDot() {
@@ -104,7 +104,7 @@ export function AppSidebar() {
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup className="group/ws-section">
                     <DropdownMenuLabel className="flex items-center text-xs text-muted-foreground">
-                      Workspaces
+                      工作区
                       <Tooltip>
                         <TooltipTrigger
                           className="ml-auto opacity-0 group-hover/ws-section:opacity-100 transition-opacity rounded hover:bg-accent p-0.5"
@@ -113,7 +113,7 @@ export function AppSidebar() {
                           <Plus className="h-3.5 w-3.5" />
                         </TooltipTrigger>
                         <TooltipContent side="right">
-                          Create workspace
+                          创建工作区
                         </TooltipContent>
                       </Tooltip>
                     </DropdownMenuLabel>
@@ -138,7 +138,7 @@ export function AppSidebar() {
                   <DropdownMenuGroup>
                     <DropdownMenuItem variant="destructive" onClick={logout}>
                       <LogOut className="h-3.5 w-3.5" />
-                      Log out
+                      退出登录
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
@@ -153,7 +153,7 @@ export function AppSidebar() {
                 <SquarePen className="size-3.5" />
                 <DraftDot />
               </TooltipTrigger>
-              <TooltipContent side="bottom">New issue</TooltipContent>
+              <TooltipContent side="bottom">新建任务</TooltipContent>
             </Tooltip>
           </div>
         </SidebarHeader>
