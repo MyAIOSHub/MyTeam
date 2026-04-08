@@ -11,12 +11,12 @@ import { CreateProjectDialog } from "@/features/projects/components/create-proje
 import ProjectDetailInline from "./[id]/page";
 
 const STATUS_BADGE: Record<ProjectStatus, string> = {
-  not_started: "bg-[rgba(255,255,255,0.06)] text-[#8a8f98] border-[rgba(255,255,255,0.08)]",
+  not_started: "bg-accent text-muted-foreground border-border",
   running: "bg-[rgba(94,106,210,0.15)] text-[#8b9cf7] border-[rgba(94,106,210,0.25)]",
   paused: "bg-[rgba(255,180,50,0.15)] text-[#f0b440] border-[rgba(255,180,50,0.25)]",
   completed: "bg-[rgba(39,166,68,0.15)] text-[#4ade80] border-[rgba(39,166,68,0.25)]",
   failed: "bg-[rgba(239,68,68,0.15)] text-[#f87171] border-[rgba(239,68,68,0.25)]",
-  archived: "bg-[rgba(255,255,255,0.06)] text-[#62666d] border-[rgba(255,255,255,0.08)]",
+  archived: "bg-accent text-muted-foreground/60 border-border",
 };
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
@@ -57,16 +57,16 @@ export default function ProjectsPage() {
   return (
     <div className="flex flex-1 min-h-0">
       {/* Left sidebar */}
-      <div className="flex w-[280px] shrink-0 flex-col border-r border-[rgba(255,255,255,0.05)] bg-[#0f1011]">
+      <div className="flex w-[280px] shrink-0 flex-col border-r border-border bg-card">
         {/* Search */}
-        <div className="p-3 border-b border-[rgba(255,255,255,0.05)]">
+        <div className="p-3 border-b border-border">
           <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-[#62666d]" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/60" />
             <Input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="搜索项目..."
-              className="pl-8 h-8 text-sm bg-[rgba(255,255,255,0.05)] border-[rgba(255,255,255,0.08)] text-[#f7f8f8] placeholder:text-[#62666d]"
+              className="pl-8 h-8 text-sm bg-accent border-border text-foreground placeholder:text-muted-foreground/60"
             />
           </div>
         </div>
@@ -78,7 +78,7 @@ export default function ProjectsPage() {
               <Loader2 className="size-5 animate-spin text-muted-foreground" />
             </div>
           ) : filteredProjects.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-[#8a8f98] px-4">
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground px-4">
               <p className="text-sm">
                 {searchQuery ? "无匹配项目" : "暂无项目"}
               </p>
@@ -91,8 +91,8 @@ export default function ProjectsPage() {
                   type="button"
                   className={`w-full text-left rounded-md px-3 py-2.5 transition-colors ${
                     selectedId === project.id
-                      ? "bg-[rgba(255,255,255,0.08)] text-[#f7f8f8]"
-                      : "hover:bg-[rgba(255,255,255,0.05)] text-[#d0d6e0]"
+                      ? "bg-muted text-foreground"
+                      : "hover:bg-accent text-secondary-foreground"
                   }`}
                   onClick={() => setSelectedId(project.id)}
                 >
@@ -106,7 +106,7 @@ export default function ProjectsPage() {
                     >
                       {STATUS_LABEL[project.status] ?? project.status}
                     </Badge>
-                    <span className="text-[11px] text-[#8a8f98]">
+                    <span className="text-[11px] text-muted-foreground">
                       {SCHEDULE_LABEL[project.schedule_type]}
                     </span>
                   </div>
@@ -117,10 +117,10 @@ export default function ProjectsPage() {
         </div>
 
         {/* Create button */}
-        <div className="p-3 border-t border-[rgba(255,255,255,0.05)]">
+        <div className="p-3 border-t border-border">
           <Button
             onClick={() => setCreateOpen(true)}
-            className="w-full bg-[#5e6ad2] hover:bg-[#4f5abf] text-white"
+            className="w-full bg-primary hover:bg-primary/90 text-white"
             size="sm"
           >
             <Plus className="size-3.5 mr-1.5" />
@@ -134,8 +134,8 @@ export default function ProjectsPage() {
         {selectedId ? (
           <ProjectDetailInline projectId={selectedId} />
         ) : (
-          <div className="flex flex-col items-center justify-center h-full text-[#8a8f98] gap-2">
-            <FolderOpen className="size-10 text-[#62666d]" />
+          <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
+            <FolderOpen className="size-10 text-muted-foreground/60" />
             <p className="text-sm">选择一个项目</p>
           </div>
         )}

@@ -55,12 +55,12 @@ import type { WorkflowStep } from "@/shared/types/workflow";
 import type { Message } from "@/shared/types/messaging";
 
 const STATUS_BADGE: Record<ProjectStatus, string> = {
-  not_started: "bg-[rgba(255,255,255,0.06)] text-[#8a8f98] border-[rgba(255,255,255,0.08)]",
+  not_started: "bg-accent text-muted-foreground border-border",
   running: "bg-[rgba(94,106,210,0.15)] text-[#8b9cf7] border-[rgba(94,106,210,0.25)]",
   paused: "bg-[rgba(255,180,50,0.15)] text-[#f0b440] border-[rgba(255,180,50,0.25)]",
   completed: "bg-[rgba(39,166,68,0.15)] text-[#4ade80] border-[rgba(39,166,68,0.25)]",
   failed: "bg-[rgba(239,68,68,0.15)] text-[#f87171] border-[rgba(239,68,68,0.25)]",
-  archived: "bg-[rgba(255,255,255,0.06)] text-[#62666d] border-[rgba(255,255,255,0.08)]",
+  archived: "bg-accent text-muted-foreground/60 border-border",
 };
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
@@ -73,12 +73,12 @@ const STATUS_LABEL: Record<ProjectStatus, string> = {
 };
 
 const RUN_STATUS_BADGE: Record<string, string> = {
-  pending: "bg-[rgba(255,255,255,0.06)] text-[#8a8f98] border-[rgba(255,255,255,0.08)]",
+  pending: "bg-accent text-muted-foreground border-border",
   running: "bg-[rgba(94,106,210,0.15)] text-[#8b9cf7] border-[rgba(94,106,210,0.25)]",
   paused: "bg-[rgba(255,180,50,0.15)] text-[#f0b440] border-[rgba(255,180,50,0.25)]",
   completed: "bg-[rgba(39,166,68,0.15)] text-[#4ade80] border-[rgba(39,166,68,0.25)]",
   failed: "bg-[rgba(239,68,68,0.15)] text-[#f87171] border-[rgba(239,68,68,0.25)]",
-  cancelled: "bg-[rgba(255,255,255,0.06)] text-[#62666d] border-[rgba(255,255,255,0.08)]",
+  cancelled: "bg-accent text-muted-foreground/60 border-border",
 };
 
 interface PlanEditorStep extends PlanStep {
@@ -476,7 +476,7 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
 
       {/* Version selector */}
       {versions.length > 1 && (
-        <div className="mb-4 border border-[rgba(255,255,255,0.08)] rounded-lg p-3 bg-[rgba(255,255,255,0.02)]">
+        <div className="mb-4 border border-border rounded-lg p-3 bg-card">
           <h3 className="text-sm font-medium mb-2">版本</h3>
           <VersionTree versions={versions} onSelect={() => {}} />
         </div>
@@ -496,9 +496,9 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
         <TabsContent value="plan" className="space-y-4">
           {/* Task brief */}
           {(plan as any)?.task_brief && (
-            <div className="border border-[rgba(255,255,255,0.08)] rounded-lg p-4 bg-[rgba(255,255,255,0.02)]">
-              <h3 className="text-sm font-medium text-[#f7f8f8] mb-2">任务简报</h3>
-              <div className="text-sm text-[#d0d6e0] whitespace-pre-wrap">
+            <div className="border border-border rounded-lg p-4 bg-card">
+              <h3 className="text-sm font-medium text-foreground mb-2">任务简报</h3>
+              <div className="text-sm text-secondary-foreground whitespace-pre-wrap">
                 {(plan as any).task_brief}
               </div>
             </div>
@@ -515,8 +515,8 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
           </div>
 
           {/* Approval section */}
-          <div className="border border-[rgba(255,255,255,0.08)] rounded-lg p-4 bg-[rgba(255,255,255,0.02)]">
-            <h3 className="text-sm font-medium text-[#f7f8f8] mb-3">审批</h3>
+          <div className="border border-border rounded-lg p-4 bg-card">
+            <h3 className="text-sm font-medium text-foreground mb-3">审批</h3>
             {approvalStatus === "draft" ||
             approvalStatus === "pending_approval" ||
             !approvalStatus ? (
@@ -647,7 +647,7 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
                       />
                     ))
                 ) : (
-                  <div className="text-sm text-[#8a8f98] border border-[rgba(255,255,255,0.08)] rounded-lg p-4 text-center bg-[rgba(255,255,255,0.02)]">
+                  <div className="text-sm text-muted-foreground border border-border rounded-lg p-4 text-center bg-card">
                     暂无步骤数据
                   </div>
                 )}
@@ -691,7 +691,7 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
                 {runs.map((run: ProjectRun) => (
                   <div
                     key={run.id}
-                    className="flex items-center gap-3 p-3 border border-[rgba(255,255,255,0.08)] rounded-lg bg-[rgba(255,255,255,0.02)]"
+                    className="flex items-center gap-3 p-3 border border-border rounded-lg bg-card"
                   >
                     <Badge
                       className={RUN_STATUS_BADGE[run.status] ?? ""}
@@ -728,16 +728,16 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
         <TabsContent value="channel">
           {currentProject.channel_id ? (
             <div
-              className="flex flex-col border border-[rgba(255,255,255,0.08)] rounded-lg"
+              className="flex flex-col border border-border rounded-lg"
               style={{ height: "500px" }}
             >
-              <div className="p-3 border-b border-[rgba(255,255,255,0.05)]">
-                <h3 className="font-medium text-sm text-[#f7f8f8]">项目频道</h3>
+              <div className="p-3 border-b border-border">
+                <h3 className="font-medium text-sm text-foreground">项目频道</h3>
               </div>
               <div className="flex-1 overflow-auto p-4 space-y-3">
                 {channelMessages.map((msg) => (
                   <div key={msg.id} className="flex justify-start">
-                    <div className="max-w-[70%] px-4 py-2 rounded-lg text-sm bg-[rgba(255,255,255,0.05)]">
+                    <div className="max-w-[70%] px-4 py-2 rounded-lg text-sm bg-accent">
                       <div className="text-xs opacity-70 mb-1">
                         {msg.sender_id?.slice(0, 12)} ·{" "}
                         {new Date(msg.created_at).toLocaleTimeString()}
@@ -879,10 +879,10 @@ function RunSummaryBar({
   }
 
   return (
-    <div className="border border-[rgba(255,255,255,0.08)] rounded-lg p-4 space-y-3 bg-[rgba(255,255,255,0.02)]">
+    <div className="border border-border rounded-lg p-4 space-y-3 bg-card">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h3 className="text-sm font-medium text-[#f7f8f8]">当前运行</h3>
+          <h3 className="text-sm font-medium text-foreground">当前运行</h3>
           <Badge
             className={RUN_STATUS_BADGE[run.status] ?? ""}
             variant="outline"

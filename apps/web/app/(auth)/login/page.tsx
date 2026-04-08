@@ -191,7 +191,7 @@ function LoginPageContent() {
               <span className="font-medium text-[#f7f8f8]">
                 {existingUser.email}
               </span>{" "}
-              的身份访问 Multica？
+              的身份访问 My Team？
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">

@@ -1,5 +1,5 @@
+import { redirect } from "next/navigation";
 import type { Metadata } from "next";
-import { MulticaLanding } from "@/features/landing/components/multica-landing";
 
 export const metadata: Metadata = {
   title: "Homepage",
@@ -17,5 +17,5 @@ export const metadata: Metadata = {
 };
 
 export default function HomepagePage() {
-  return <MulticaLanding />;
+  redirect("/login");
 }
