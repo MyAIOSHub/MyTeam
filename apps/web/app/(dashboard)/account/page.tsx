@@ -1,18 +1,18 @@
 "use client"
 import { useState } from "react"
-import { useSearchParams, useRouter } from "next/navigation"
 import { useWorkspaceStore } from "@/features/workspace"
 import { useAuthStore } from "@/features/auth"
 import { api } from "@/shared/api"
 import { toast } from "sonner"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import {
   Bot, Terminal, Code, Key, ChevronDown, ChevronRight,
-  Copy, Check, Plus, Zap, Circle, Shield, Cpu, Wrench,
-  Sparkles, Globe, User, Activity
+  Copy, Check, Plus, Zap, Circle, Shield, Wrench,
+  Globe, User, GitBranch
 } from "lucide-react"
 
 /* ================================================================== */
-/* Shared helpers                                                      */
+/* Helpers                                                             */
 /* ================================================================== */
 
 function CopyBtn({ text }: { text: string }) {
@@ -51,17 +51,6 @@ function Collapse({ title, icon: Icon, open: defaultOpen = false, children }: {
   )
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="grid grid-cols-[200px_1fr] gap-8 items-start">
-      <div className="pt-1">
-        <div className="text-[14px] font-medium text-foreground">{label}</div>
-      </div>
-      <div>{children}</div>
-    </div>
-  )
-}
-
 const STATUS: Record<string, { label: string; dot: string }> = {
   idle: { label: "空闲", dot: "bg-green-500" },
   working: { label: "工作中", dot: "bg-primary" },
@@ -72,11 +61,15 @@ const STATUS: Record<string, { label: string; dot: string }> = {
   error: { label: "错误", dot: "bg-destructive" },
 }
 
+function getStatus(s: string) {
+  return STATUS[s] ?? { label: "离线", dot: "bg-muted-foreground/30" }
+}
+
 /* ================================================================== */
-/* Tab: Owner                                                          */
+/* Tab 1: Owner 概览                                                   */
 /* ================================================================== */
 
-function OwnerTab() {
+function OverviewTab() {
   const user = useAuthStore(s => s.user)
   const workspace = useWorkspaceStore(s => s.workspace)
   const agents = useWorkspaceStore(s => s.agents)
@@ -84,8 +77,9 @@ function OwnerTab() {
 
   return (
     <div className="space-y-8">
-      {/* Profile card */}
-      <Row label="个人信息">
+      {/* Profile */}
+      <section>
+        <h2 className="text-sm font-semibold mb-4">个人信息</h2>
         <div className="border border-border rounded-[12px] bg-card overflow-hidden">
           <div className="h-12 bg-gradient-to-r from-primary/20 via-primary/10 to-transparent" />
           <div className="px-5 pb-5 -mt-4 space-y-3">
@@ -102,10 +96,11 @@ function OwnerTab() {
             </div>
           </div>
         </div>
-      </Row>
+      </section>
 
-      {/* Role / Workspace / Stats */}
-      <Row label="身份概览">
+      {/* Stats */}
+      <section>
+        <h2 className="text-sm font-semibold mb-4">身份概览</h2>
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-card border border-border rounded-[8px] px-3.5 py-3">
             <div className="text-[11px] text-muted-foreground mb-1">角色</div>
@@ -122,10 +117,11 @@ function OwnerTab() {
             <div className="text-[14px] font-medium text-foreground">{list.length} 个</div>
           </div>
         </div>
-      </Row>
+      </section>
 
-      {/* Organization hierarchy */}
-      <Row label="组织层级">
+      {/* Hierarchy */}
+      <section>
+        <h2 className="text-sm font-semibold mb-4">组织层级</h2>
         <div className="bg-card border border-border rounded-[8px] px-4 py-3 space-y-2">
           <div className="flex items-center gap-2 text-[13px]">
             <Globe className="h-3.5 w-3.5 text-muted-foreground" />
@@ -142,68 +138,93 @@ function OwnerTab() {
             <div key={a.id} className="flex items-center gap-2 text-[13px] pl-10">
               <Bot className="h-3.5 w-3.5 text-muted-foreground" />
               <span className="text-foreground">{a.name}</span>
-              <span className={`h-[6px] w-[6px] rounded-full ${(STATUS[a.status as string] ?? { dot: "bg-muted-foreground/30" }).dot}`} />
-              <span className="text-[11px] text-muted-foreground">{(STATUS[a.status as string] ?? { label: "离线" }).label}</span>
+              <span className={`h-[6px] w-[6px] rounded-full ${getStatus(a.status as string).dot}`} />
+              <span className="text-[11px] text-muted-foreground">{getStatus(a.status as string).label}</span>
             </div>
           ))}
-          {list.length === 0 && (
-            <div className="text-[12px] text-muted-foreground/60 pl-10">暂无 Agent</div>
-          )}
+          {list.length === 0 && <div className="text-[12px] text-muted-foreground/60 pl-10">暂无 Agent</div>}
         </div>
-      </Row>
+      </section>
     </div>
   )
 }
 
 /* ================================================================== */
-/* Tab: Agent 管理                                                     */
+/* Tab 2: Agent 列表                                                   */
 /* ================================================================== */
 
-function AgentCard({ agent, onImpersonate }: { agent: any; onImpersonate: (id: string) => void }) {
-  const s = (agent.status && STATUS[agent.status as string]) ? STATUS[agent.status as string]! : { label: "离线", dot: "bg-muted-foreground/30" }
+function AgentListTab() {
+  const agents = useWorkspaceStore(s => s.agents)
+  const list = Array.isArray(agents) ? agents : []
+
+  const impersonate = (id: string) => {
+    localStorage.setItem("multica_impersonate_agent", id)
+    window.location.reload()
+  }
+
   return (
-    <div className="border border-border rounded-[8px] bg-card p-4 hover:bg-secondary/30 transition-colors space-y-3">
-      <div className="flex items-center gap-3">
-        <div className="h-9 w-9 rounded-[8px] bg-primary/10 flex items-center justify-center shrink-0">
-          <Bot className="h-4.5 w-4.5 text-primary" />
+    <div className="space-y-6">
+      <h2 className="text-sm font-semibold">Agent 列表</h2>
+      {list.length > 0 ? (
+        <div className="space-y-3">
+          {list.map(a => {
+            const s = getStatus(a.status as string)
+            return (
+              <div key={a.id} className="border border-border rounded-[8px] bg-card p-4 hover:bg-secondary/30 transition-colors space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-[8px] bg-primary/10 flex items-center justify-center shrink-0">
+                    <Bot className="h-4 w-4 text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[14px] font-medium text-foreground truncate">{a.name}</div>
+                    <div className="text-[12px] text-muted-foreground truncate">{a.description || "暂无描述"}</div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className={`h-[7px] w-[7px] rounded-full ${s.dot}`} />
+                    <span className="text-[11px] text-muted-foreground">{s.label}</span>
+                  </div>
+                </div>
+                {(a.skills?.length > 0 || (a.identity_card?.skills?.length ?? 0) > 0) && (
+                  <div className="flex flex-wrap gap-1">
+                    {(a.identity_card?.skills ?? a.skills?.map(s => s.name) ?? []).slice(0, 5).map((t: string) => (
+                      <span key={t} className="text-[11px] px-2 py-[2px] rounded-full border border-border text-secondary-foreground bg-secondary/50">{t}</span>
+                    ))}
+                  </div>
+                )}
+                {(a.identity_card?.tools?.length ?? 0) > 0 && (
+                  <div className="text-[12px] text-muted-foreground flex items-center gap-1.5">
+                    <Wrench className="h-3 w-3" /><span>{a.identity_card?.tools?.join(" · ")}</span>
+                  </div>
+                )}
+                <button onClick={() => impersonate(a.id)}
+                  className="w-full text-[12px] font-medium text-primary border border-border rounded-[6px] px-3 py-1.5 hover:bg-secondary/50 transition-colors">
+                  附身代理
+                </button>
+              </div>
+            )
+          })}
         </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-[14px] font-medium text-foreground truncate leading-tight">{agent.display_name ?? agent.name}</div>
-          <div className="text-[12px] text-muted-foreground truncate">{agent.description || "暂无描述"}</div>
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <span className={`h-[7px] w-[7px] rounded-full ${s.dot}`} />
-          <span className="text-[11px] text-muted-foreground">{s.label}</span>
-        </div>
-      </div>
-      {(agent.capabilities?.length > 0 || agent.identity_card?.skills?.length > 0) && (
-        <div className="flex flex-wrap gap-1">
-          {(agent.identity_card?.skills ?? agent.capabilities ?? []).slice(0, 5).map((t: string) => (
-            <span key={t} className="text-[11px] px-2 py-[2px] rounded-full border border-border text-secondary-foreground bg-secondary/50">{t}</span>
-          ))}
+      ) : (
+        <div className="border border-dashed border-border rounded-[8px] bg-card/50 py-10 flex flex-col items-center">
+          <Bot className="h-8 w-8 text-muted-foreground/30 mb-2" />
+          <p className="text-[13px] text-muted-foreground">暂无 Agent</p>
+          <p className="text-[12px] text-muted-foreground/70 mt-0.5">前往「添加 Agent」创建</p>
         </div>
       )}
-      {agent.identity_card?.tools?.length > 0 && (
-        <div className="text-[12px] text-muted-foreground flex items-center gap-1.5">
-          <Wrench className="h-3 w-3" />
-          <span>{agent.identity_card.tools.join(" · ")}</span>
-        </div>
-      )}
-      <button onClick={() => onImpersonate(agent.id)}
-        className="w-full text-[12px] font-medium text-primary border border-border rounded-[6px] px-3 py-1.5 hover:bg-secondary/50 transition-colors">
-        附身代理
-      </button>
     </div>
   )
 }
+
+/* ================================================================== */
+/* Tab 3: 添加 Agent                                                   */
+/* ================================================================== */
 
 function CreateForm({ onDone }: { onDone: () => void }) {
   const [name, setName] = useState("")
   const [desc, setDesc] = useState("")
   const [busy, setBusy] = useState(false)
   const handle = async () => {
-    if (!name.trim()) return
-    setBusy(true)
+    if (!name.trim()) return; setBusy(true)
     try {
       await api.createAgent({ name: name.trim(), description: desc.trim() || undefined, runtime_id: "", visibility: "private" })
       toast.success(`Agent "${name}" 创建成功`); setName(""); setDesc(""); onDone()
@@ -224,7 +245,7 @@ function CreateForm({ onDone }: { onDone: () => void }) {
   )
 }
 
-function AgentTab() {
+function AddAgentTab() {
   const workspace = useWorkspaceStore(s => s.workspace)
   const agents = useWorkspaceStore(s => s.agents)
   const list = Array.isArray(agents) ? agents : []
@@ -237,124 +258,108 @@ function AgentTab() {
     } catch {}
   }
 
-  const impersonate = (id: string) => {
-    localStorage.setItem("multica_impersonate_agent", id)
-    window.location.reload()
-  }
-
   return (
-    <div className="space-y-8">
-      {/* Agent list */}
-      <Row label="Agent 列表">
-        {list.length > 0 ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {list.map(a => <AgentCard key={a.id} agent={a} onImpersonate={impersonate} />)}
+    <div className="space-y-4">
+      <h2 className="text-sm font-semibold">添加 Agent</h2>
+      <p className="text-xs text-muted-foreground">四种方式接入 Agent，选择适合你的方式</p>
+
+      <div className="space-y-2.5">
+        <Collapse title="网页创建 — 快速创建 Personal Agent" icon={Plus} open={list.length === 0}>
+          <p className="text-[13px] text-muted-foreground mt-2 mb-1">填写名称即可创建：</p>
+          <CreateForm onDone={refresh} />
+        </Collapse>
+
+        <Collapse title="CLI 注册 — 通过 Daemon 注册本地运行时" icon={Terminal}>
+          <div className="space-y-3 pt-3">
+            <p className="text-[13px] text-muted-foreground">在终端运行以下命令：</p>
+            <div className="space-y-2.5">
+              <div><p className="text-[12px] text-muted-foreground mb-1">1. 安装</p><CodeBlock code="brew install multica-ai/tap/multica" /></div>
+              <div><p className="text-[12px] text-muted-foreground mb-1">2. 登录</p><CodeBlock code="multica login" /></div>
+              <div><p className="text-[12px] text-muted-foreground mb-1">3. 启动 Daemon</p><CodeBlock code="multica daemon start" /></div>
+            </div>
+            <p className="text-[12px] text-muted-foreground/80 bg-secondary rounded-[6px] px-3 py-2">
+              💡 Daemon 自动检测本地 <code className="font-mono text-[11px] bg-muted px-1 rounded">claude</code>、<code className="font-mono text-[11px] bg-muted px-1 rounded">codex</code> 等 CLI 并注册为运行时。
+            </p>
           </div>
-        ) : (
-          <div className="border border-dashed border-border rounded-[8px] bg-card/50 py-10 flex flex-col items-center">
-            <Bot className="h-8 w-8 text-muted-foreground/30 mb-2" />
-            <p className="text-[13px] text-muted-foreground">暂无 Agent</p>
-            <p className="text-[12px] text-muted-foreground/70 mt-0.5">通过以下方式添加</p>
+        </Collapse>
+
+        <Collapse title="Claude Code 连接 — 通过 MCP 接入 My Team" icon={Code}>
+          <div className="space-y-3 pt-3">
+            <p className="text-[13px] text-muted-foreground">在 Claude Code 中添加 MCP Server：</p>
+            <CodeBlock code={`// .claude/settings.json\n{\n  "mcpServers": {\n    "myteam": {\n      "command": "multica",\n      "args": ["mcp", "serve"],\n      "env": { "MULTICA_TOKEN": "<your-token>" }\n    }\n  }\n}`} />
+            <p className="text-[12px] text-muted-foreground/80 bg-secondary rounded-[6px] px-3 py-2">
+              🔑 Token 在「<a href="/settings" className="text-primary hover:underline">设置 → API 令牌</a>」中创建。
+            </p>
           </div>
-        )}
-      </Row>
+        </Collapse>
 
-      {/* Add agent guide */}
-      <Row label="添加 Agent">
-        <div className="space-y-2.5">
-          <Collapse title="网页创建 — 快速创建 Personal Agent" icon={Plus} open={list.length === 0}>
-            <p className="text-[13px] text-muted-foreground mt-2 mb-1">填写名称即可创建：</p>
-            <CreateForm onDone={refresh} />
-          </Collapse>
+        <Collapse title="REST API — 编程式注册 Agent" icon={Key}>
+          <div className="space-y-3 pt-3">
+            <CodeBlock code={`curl -X POST /api/agents \\\n  -H "Authorization: Bearer <token>" \\\n  -H "X-Workspace-ID: ${workspace?.id ?? '<workspace-id>'}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"name":"my-agent","runtime_id":"","visibility":"private"}'`} />
+          </div>
+        </Collapse>
+      </div>
 
-          <Collapse title="CLI 注册 — 通过 Daemon 注册本地运行时" icon={Terminal}>
-            <div className="space-y-3 pt-3">
-              <p className="text-[13px] text-muted-foreground">在终端运行以下命令：</p>
-              <div className="space-y-2.5">
-                <div><p className="text-[12px] text-muted-foreground mb-1">1. 安装</p><CodeBlock code="brew install multica-ai/tap/multica" /></div>
-                <div><p className="text-[12px] text-muted-foreground mb-1">2. 登录</p><CodeBlock code="multica login" /></div>
-                <div><p className="text-[12px] text-muted-foreground mb-1">3. 启动 Daemon</p><CodeBlock code="multica daemon start" /></div>
-              </div>
-              <p className="text-[12px] text-muted-foreground/80 bg-secondary rounded-[6px] px-3 py-2">
-                💡 Daemon 自动检测本地 <code className="font-mono text-[11px] bg-muted px-1 rounded">claude</code>、<code className="font-mono text-[11px] bg-muted px-1 rounded">codex</code> 等 CLI 并注册为运行时。
-              </p>
-            </div>
-          </Collapse>
-
-          <Collapse title="Claude Code 连接 — 通过 MCP 接入 My Team" icon={Code}>
-            <div className="space-y-3 pt-3">
-              <p className="text-[13px] text-muted-foreground">在 Claude Code 中添加 MCP Server：</p>
-              <CodeBlock code={`// .claude/settings.json\n{\n  "mcpServers": {\n    "myteam": {\n      "command": "multica",\n      "args": ["mcp", "serve"],\n      "env": { "MULTICA_TOKEN": "<your-token>" }\n    }\n  }\n}`} />
-              <p className="text-[12px] text-muted-foreground/80 bg-secondary rounded-[6px] px-3 py-2">
-                🔑 Token 在「<a href="/settings" className="text-primary hover:underline">设置 → API 令牌</a>」中创建。
-              </p>
-            </div>
-          </Collapse>
-
-          <Collapse title="REST API — 编程式注册 Agent" icon={Key}>
-            <div className="space-y-3 pt-3">
-              <CodeBlock code={`curl -X POST /api/agents \\\n  -H "Authorization: Bearer <token>" \\\n  -H "X-Workspace-ID: ${workspace?.id ?? '<workspace-id>'}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"name":"my-agent","runtime_id":"","visibility":"private"}'`} />
-            </div>
-          </Collapse>
-        </div>
-      </Row>
+      <div className="flex items-center gap-2 pt-1 text-[13px] text-muted-foreground">
+        <Zap className="h-3.5 w-3.5 text-primary" />
+        <span>管理 Token：<a href="/settings" className="text-primary hover:underline">设置 → API 令牌</a></span>
+      </div>
     </div>
   )
 }
 
 /* ================================================================== */
-/* Page with Tabs                                                      */
+/* Tab definitions                                                     */
 /* ================================================================== */
 
-const TABS = [
-  { key: "owner", label: "Owner 视图", icon: User },
-  { key: "agents", label: "Agent 管理", icon: Bot },
-] as const
+const ownerTabs = [
+  { value: "overview", label: "概览", icon: User },
+  { value: "agents", label: "Agent 列表", icon: Bot },
+  { value: "add-agent", label: "添加 Agent", icon: Plus },
+]
 
-type TabKey = (typeof TABS)[number]["key"]
+const orgTabs = [
+  { value: "hierarchy", label: "组织层级", icon: GitBranch },
+]
+
+/* ================================================================== */
+/* Page — Settings-style vertical tab layout                           */
+/* ================================================================== */
 
 export default function AccountPage() {
-  const searchParams = useSearchParams()
-  const router = useRouter()
-  const tabParam = searchParams.get("tab")
-  const [activeTab, setActiveTab] = useState<TabKey>(
-    tabParam === "agents" ? "agents" : "owner"
-  )
-
-  const switchTab = (tab: TabKey) => {
-    setActiveTab(tab)
-    router.replace(tab === "owner" ? "/account" : `/account?tab=${tab}`, { scroll: false })
-  }
-
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* Tab bar — Linear style underline tabs */}
-      <div className="shrink-0 border-b border-border px-6">
-        <div className="flex items-center gap-0 max-w-5xl mx-auto">
-          <h1 className="text-[16px] font-semibold text-foreground mr-8 py-3">身份</h1>
-          {TABS.map(t => {
-            const active = activeTab === t.key
-            return (
-              <button key={t.key} onClick={() => switchTab(t.key)}
-                className={`relative flex items-center gap-1.5 px-3 py-3 text-[13px] font-medium transition-colors ${
-                  active ? "text-foreground" : "text-muted-foreground hover:text-foreground"
-                }`}>
-                <t.icon className="h-3.5 w-3.5" />
-                {t.label}
-                {active && <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-full" />}
-              </button>
-            )
-          })}
-        </div>
+    <Tabs defaultValue="overview" orientation="vertical" className="flex-1 min-h-0 gap-0 bg-background">
+      {/* Left nav — same style as Settings */}
+      <div className="w-52 shrink-0 border-r border-border overflow-y-auto p-4">
+        <h1 className="text-sm font-semibold mb-4 px-2 text-foreground">身份</h1>
+        <TabsList variant="line" className="flex-col items-stretch">
+          <span className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">Owner</span>
+          {ownerTabs.map((tab) => (
+            <TabsTrigger key={tab.value} value={tab.value}>
+              <tab.icon className="h-4 w-4" />
+              {tab.label}
+            </TabsTrigger>
+          ))}
+
+          <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground">组织</span>
+          {orgTabs.map((tab) => (
+            <TabsTrigger key={tab.value} value={tab.value}>
+              <tab.icon className="h-4 w-4" />
+              {tab.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-5xl mx-auto px-6 py-8">
-          {activeTab === "owner" && <OwnerTab />}
-          {activeTab === "agents" && <AgentTab />}
+      {/* Right content */}
+      <div className="flex-1 min-w-0 overflow-y-auto">
+        <div className="w-full max-w-3xl mx-auto p-6">
+          <TabsContent value="overview"><OverviewTab /></TabsContent>
+          <TabsContent value="agents"><AgentListTab /></TabsContent>
+          <TabsContent value="add-agent"><AddAgentTab /></TabsContent>
+          <TabsContent value="hierarchy"><OverviewTab /></TabsContent>
         </div>
       </div>
-    </div>
+    </Tabs>
   )
 }
