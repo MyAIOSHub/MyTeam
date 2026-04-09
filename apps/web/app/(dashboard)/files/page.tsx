@@ -1,58 +1,131 @@
 "use client"
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, useCallback } from "react"
+import { api } from "@/shared/api"
+import { toast } from "sonner"
+
+interface FileItem {
+  id: string
+  file_name: string
+  file_size?: number
+  content_type?: string
+  url?: string
+  source_type?: string
+  created_at: string
+}
+
+const FILE_ICONS: Record<string, string> = {
+  pdf: "📕", doc: "📘", docx: "📘", xls: "📗", xlsx: "📗", csv: "📊",
+  png: "🖼️", jpg: "🖼️", jpeg: "🖼️", gif: "🖼️", svg: "🖼️",
+  ts: "🟦", tsx: "🟦", js: "🟨", jsx: "🟨", py: "🐍", go: "🔵", rs: "🦀",
+  zip: "📦", tar: "📦", gz: "📦", rar: "📦",
+  md: "📝", txt: "📝", json: "📝", yaml: "📝", yml: "📝",
+}
+
+function getIcon(name: string) {
+  const ext = name.split(".").pop()?.toLowerCase() ?? ""
+  return FILE_ICONS[ext] ?? "📄"
+}
+
+function formatSize(bytes?: number) {
+  if (!bytes) return ""
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1048576).toFixed(1)} MB`
+}
+
+function timeAgo(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return "刚刚"
+  if (min < 60) return `${min} 分钟前`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr} 小时前`
+  const d = Math.floor(hr / 24)
+  if (d < 30) return `${d} 天前`
+  return new Date(dateStr).toLocaleDateString()
+}
 
 export default function FilesPage() {
-  const [files, setFiles] = useState<any[]>([])
+  const [files, setFiles] = useState<FileItem[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    // Fetch files from issues' attachments
-    async function load() {
-      try {
-        // Use issues API to get attachments (no direct file list API)
-        // For now fetch recent issues and collect attachments
-        const res = await fetch("/api/issues?limit=50")
-        const data = await res.json()
-        const allFiles: any[] = []
-        // Files will appear as attachments from issues
-        setFiles(allFiles)
-      } catch {} finally { setLoading(false) }
+  const loadFiles = useCallback(async () => {
+    try {
+      // Try file_index API first
+      const indexFiles = await api.listMyFiles().catch(() => null)
+      if (Array.isArray(indexFiles) && indexFiles.length > 0) {
+        setFiles(indexFiles.map((f: any) => ({
+          id: f.id,
+          file_name: f.file_name,
+          file_size: f.file_size,
+          content_type: f.content_type,
+          url: f.storage_path,
+          source_type: f.source_type,
+          created_at: f.created_at,
+        })))
+        return
+      }
+
+      // Fallback: collect attachments from issues
+      const res = await fetch("/api/issues?limit=50")
+      if (!res.ok) { setFiles([]); return }
+      const data = await res.json()
+      const issues = Array.isArray(data) ? data : Array.isArray(data?.issues) ? data.issues : []
+      const allFiles: FileItem[] = []
+      for (const issue of issues) {
+        if (issue.attachments?.length > 0) {
+          for (const att of issue.attachments) {
+            allFiles.push({
+              id: att.id,
+              file_name: att.file_name ?? att.filename ?? "unknown",
+              file_size: att.file_size ?? att.size_bytes,
+              content_type: att.file_content_type ?? att.content_type,
+              url: att.url,
+              source_type: "issue",
+              created_at: att.created_at ?? issue.created_at,
+            })
+          }
+        }
+      }
+      setFiles(allFiles)
+    } catch {
+      setFiles([])
+    } finally {
+      setLoading(false)
     }
-    load()
   }, [])
+
+  useEffect(() => { loadFiles() }, [loadFiles])
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const fileList = e.target.files
     if (!fileList || fileList.length === 0) return
     setUploading(true)
+    let successCount = 0
     try {
       for (const file of Array.from(fileList)) {
-        const formData = new FormData()
-        formData.append("file", file)
-        await fetch("/api/upload-file", { method: "POST", body: formData })
+        try {
+          await api.uploadFile(file)
+          successCount++
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "上传失败"
+          if (msg.includes("not configured") || msg.includes("unavailable")) {
+            toast.error("文件上传服务未配置（需要 S3 存储）")
+            break
+          }
+          toast.error(`上传 ${file.name} 失败: ${msg}`)
+        }
       }
-      // Reload
-    } catch {} finally {
+      if (successCount > 0) {
+        toast.success(`已上传 ${successCount} 个文件`)
+        await loadFiles()
+      }
+    } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ""
     }
-  }
-
-  const fileIcons: Record<string, string> = {
-    pdf: "📕", doc: "📘", xls: "📗", png: "🖼️", jpg: "🖼️",
-    ts: "🟦", js: "🟨", py: "🐍", go: "🔵", zip: "📦"
-  }
-  function getIcon(name: string) {
-    const ext = name.split(".").pop()?.toLowerCase() ?? ""
-    return fileIcons[ext] ?? "📄"
-  }
-  function formatSize(bytes: number) {
-    if (!bytes) return ""
-    if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1048576) return `${(bytes/1024).toFixed(1)} KB`
-    return `${(bytes/1048576).toFixed(1)} MB`
   }
 
   return (
@@ -62,39 +135,48 @@ export default function FilesPage() {
         <div>
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleUpload} />
           <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-            className="px-4 py-2 bg-brand text-brand-foreground rounded-md text-sm disabled:opacity-50 hover:opacity-90 transition-opacity">
+            className="px-4 py-2 bg-primary text-primary-foreground rounded-[6px] text-sm font-medium disabled:opacity-50 hover:opacity-90 transition-opacity">
             {uploading ? "上传中..." : "上传文件"}
           </button>
         </div>
       </div>
 
-      {loading && <div className="text-muted-foreground">加载中...</div>}
+      {loading && <div className="text-muted-foreground py-4">加载中...</div>}
 
       {!loading && files.length === 0 && (
-        <div className="text-center py-16 text-[#8a8f98]">
+        <div className="text-center py-16">
           <div className="text-4xl mb-3">📁</div>
-          <p className="font-medium text-[#d0d6e0]">暂无文件</p>
-          <p className="text-sm mt-1">在频道、任务中分享的文件和上传的文件将显示在此处。</p>
+          <p className="font-medium text-foreground">暂无文件</p>
+          <p className="text-sm text-muted-foreground mt-1">在会话中发送的文件和上传的文件将显示在此处</p>
+          <p className="text-xs text-muted-foreground mt-3 bg-secondary rounded-[6px] px-3 py-2 inline-block">
+            💡 本地开发环境需要配置 S3 存储才能上传文件。设置 <code className="font-mono bg-muted px-1 rounded">S3_BUCKET</code> 环境变量。
+          </p>
         </div>
       )}
 
       <div className="space-y-1">
-        {files.map((f: any) => (
-          <div key={f.id} className="flex items-center gap-3 p-3 rounded-lg border border-[rgba(255,255,255,0.05)] hover:bg-[rgba(255,255,255,0.03)] transition-colors">
-            <span className="text-2xl">{getIcon(f.filename ?? "")}</span>
+        {files.map((f) => (
+          <div key={f.id} className="flex items-center gap-3 p-3 rounded-[8px] border border-border hover:bg-secondary/50 transition-colors">
+            <span className="text-2xl shrink-0">{getIcon(f.file_name)}</span>
             <div className="flex-1 min-w-0">
-              <div className="font-medium truncate text-foreground">{f.filename}</div>
-              <div className="text-xs text-muted-foreground">
-                {formatSize(f.size_bytes)} · {f.content_type} · {new Date(f.created_at).toLocaleDateString()}
+              <div className="font-medium truncate text-foreground text-[14px]">{f.file_name}</div>
+              <div className="text-[12px] text-muted-foreground flex items-center gap-2">
+                {f.file_size ? <span>{formatSize(f.file_size)}</span> : null}
+                {f.content_type && <span>{f.content_type}</span>}
+                <span>{timeAgo(f.created_at)}</span>
               </div>
             </div>
-            <span className="px-2 py-0.5 text-xs rounded-full bg-[rgba(255,255,255,0.06)] text-[#d0d6e0]">
-              {f.source_type ?? "upload"}
-            </span>
-            <a href={f.url} target="_blank" rel="noopener noreferrer"
-              className="px-3 py-1 text-sm rounded border border-[rgba(255,255,255,0.08)] text-[#d0d6e0] hover:bg-[rgba(255,255,255,0.05)] transition-colors">
-              下载
-            </a>
+            {f.source_type && (
+              <span className="px-2 py-0.5 text-[11px] rounded-full border border-border text-secondary-foreground bg-secondary/50">
+                {f.source_type}
+              </span>
+            )}
+            {f.url && (
+              <a href={f.url} target="_blank" rel="noopener noreferrer"
+                className="px-3 py-1 text-[12px] rounded-[6px] border border-border text-secondary-foreground hover:bg-secondary/50 transition-colors">
+                下载
+              </a>
+            )}
           </div>
         ))}
       </div>
