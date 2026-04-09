@@ -21,6 +21,8 @@ import {
   Inbox,
   Users,
   Archive,
+  Search,
+  Plus,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -51,6 +53,9 @@ function SessionSidebar({
   selectedType,
   onSelectDm,
   onSelectChannel,
+  onCreateChannel,
+  searchQuery,
+  onSearchChange,
 }: {
   conversations: Conversation[];
   channels: Channel[];
@@ -58,23 +63,50 @@ function SessionSidebar({
   selectedType: SelectionType;
   onSelectDm: (conv: Conversation) => void;
   onSelectChannel: (ch: Channel) => void;
+  onCreateChannel: () => void;
+  searchQuery: string;
+  onSearchChange: (q: string) => void;
 }) {
+  const q = searchQuery.toLowerCase()
+  const filteredConvs = q ? conversations.filter(c => (c.peer_name || "").toLowerCase().includes(q)) : conversations
+  const filteredChannels = q ? channels.filter(c => c.name.toLowerCase().includes(q)) : channels
+
   return (
     <div className="w-60 shrink-0 border-r border-border flex flex-col bg-card h-full">
+      {/* Search + Create */}
+      <div className="px-3 pt-3 pb-2 space-y-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <input
+            value={searchQuery}
+            onChange={e => onSearchChange(e.target.value)}
+            placeholder="搜索会话..."
+            className="w-full pl-8 pr-3 py-1.5 bg-secondary border border-border rounded-[6px] text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        <button
+          onClick={onCreateChannel}
+          className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-[6px] text-[12px] font-medium hover:opacity-90 transition-opacity"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          创建频道
+        </button>
+      </div>
+
       {/* DMs section */}
-      <div className="px-3 pt-4 pb-1">
+      <div className="px-3 pt-2 pb-1">
         <h3 className="text-xs font-semibold text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1.5">
           <MessageCircle className="h-3.5 w-3.5" />
           私聊
         </h3>
       </div>
       <div className="flex-none overflow-auto max-h-[40%] px-1">
-        {conversations.length === 0 ? (
+        {filteredConvs.length === 0 ? (
           <div className="px-3 py-2 text-xs text-muted-foreground">
-            暂无对话
+            {q ? "无匹配" : "暂无对话"}
           </div>
         ) : (
-          conversations.map((conv) => (
+          filteredConvs.map((conv) => (
             <button
               key={conv.peer_id}
               onClick={() => onSelectDm(conv)}
@@ -112,12 +144,12 @@ function SessionSidebar({
         </h3>
       </div>
       <div className="flex-1 overflow-auto px-1 min-h-0">
-        {channels.length === 0 ? (
+        {filteredChannels.length === 0 ? (
           <div className="px-3 py-2 text-xs text-muted-foreground">
-            暂无频道
+            {q ? "无匹配" : "暂无频道"}
           </div>
         ) : (
-          channels.map((ch) => (
+          filteredChannels.map((ch) => (
             <button
               key={ch.id}
               onClick={() => onSelectChannel(ch)}
@@ -352,6 +384,28 @@ export default function SessionPage() {
     [selectedId],
   );
 
+  // Search + Create state
+  const [sidebarSearch, setSidebarSearch] = useState("");
+  const [showCreateChannel, setShowCreateChannel] = useState(false);
+  const [newChannelName, setNewChannelName] = useState("");
+  const [creatingChannel, setCreatingChannel] = useState(false);
+
+  const handleCreateChannel = async () => {
+    if (!newChannelName.trim()) { setShowCreateChannel(true); return; }
+    setCreatingChannel(true);
+    try {
+      const ch = await api.createChannel({ name: newChannelName.trim() });
+      toast.success(`频道 #${ch.name} 创建成功`);
+      setNewChannelName("");
+      setShowCreateChannel(false);
+      fetchChannels();
+      setSelectedId(ch.id);
+      setSelectedType("channel");
+    } catch (e) {
+      toast.error("创建频道失败");
+    } finally { setCreatingChannel(false); }
+  };
+
   // Derive current messages and header info
   const messages = selectedType === "dm" ? dmMessages : channelMessages;
   const headerName =
@@ -379,7 +433,34 @@ export default function SessionPage() {
         selectedType={selectedType}
         onSelectDm={handleSelectDm}
         onSelectChannel={handleSelectChannel}
+        onCreateChannel={() => setShowCreateChannel(true)}
+        searchQuery={sidebarSearch}
+        onSearchChange={setSidebarSearch}
       />
+
+      {/* Create channel dialog */}
+      {showCreateChannel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-card border border-border rounded-[12px] p-5 w-80 space-y-4 shadow-lg">
+            <h3 className="text-[15px] font-semibold text-foreground">创建频道</h3>
+            <input
+              value={newChannelName}
+              onChange={e => setNewChannelName(e.target.value)}
+              placeholder="频道名称"
+              autoFocus
+              className="w-full px-3 py-2 bg-secondary border border-border rounded-[6px] text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              onKeyDown={e => e.key === "Enter" && handleCreateChannel()}
+            />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowCreateChannel(false)} className="px-3 py-1.5 text-[13px] text-muted-foreground hover:text-foreground transition-colors">取消</button>
+              <button onClick={handleCreateChannel} disabled={creatingChannel || !newChannelName.trim()}
+                className="px-4 py-1.5 bg-primary text-primary-foreground rounded-[6px] text-[13px] font-medium disabled:opacity-40 hover:opacity-90 transition-opacity">
+                {creatingChannel ? "创建中..." : "创建"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Center - message area */}
       <div className="flex-1 flex flex-col min-w-0 h-full bg-background">
