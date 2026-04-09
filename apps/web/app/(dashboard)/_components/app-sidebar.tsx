@@ -72,7 +72,7 @@ export function AppSidebar() {
   };
 
   return (
-      <Sidebar variant="inset" className="bg-card border-r border-border">
+      <Sidebar variant="inset" collapsible="icon" className="bg-card border-r border-border">
         {/* Workspace Switcher */}
         <SidebarHeader className="py-3">
           <div className="flex items-center gap-4">

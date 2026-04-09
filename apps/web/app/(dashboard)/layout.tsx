@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { MulticaIcon } from "@/components/multica-icon";
 import { useNavigationStore } from "@/features/navigation";
-import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
+import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
 import { AppSidebar } from "./_components/app-sidebar";
@@ -44,6 +44,7 @@ export default function DashboardLayout({
     <SidebarProvider className="h-svh bg-background">
       <AppSidebar />
       <SidebarInset className="overflow-hidden bg-background">
+        <SidebarTrigger className="fixed top-3 left-3 z-20 md:hidden" />
         {workspace ? (
           children
         ) : (
