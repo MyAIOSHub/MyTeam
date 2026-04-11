@@ -57,6 +57,9 @@ type Agent struct {
 	AccessibleFilesScope    []byte             `json:"accessible_files_scope"`
 	AllowedChannelsScope    []byte             `json:"allowed_channels_scope"`
 	LastActiveAt            pgtype.Timestamptz `json:"last_active_at"`
+	PageScope               pgtype.Text        `json:"page_scope"`
+	NeedsAttention          bool               `json:"needs_attention"`
+	NeedsAttentionReason    pgtype.Text        `json:"needs_attention_reason"`
 }
 
 type AgentRuntime struct {

@@ -70,6 +70,8 @@ export interface AgentTask {
   created_at: string;
 }
 
+export type PageAgentScope = "account" | "session" | "project" | "file";
+
 export interface Agent {
   id: string;
   workspace_id: string;
@@ -96,6 +98,10 @@ export interface Agent {
   updated_at: string;
   archived_at: string | null;
   archived_by: string | null;
+  agent_type?: string;
+  page_scope?: PageAgentScope | null;
+  needs_attention?: boolean;
+  needs_attention_reason?: string | null;
 }
 
 export interface CreateAgentRequest {

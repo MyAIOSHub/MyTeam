@@ -54,6 +54,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	h := handler.New(queries, pool, hub, bus, emailSvc, s3, cfSigner)
 	h.AutoReplyService = service.NewAutoReplyService(queries, hub)
 	h.PlanGenerator = service.NewPlanGeneratorService(queries)
+	h.IdentityGenerator = service.NewIdentityGeneratorService(queries)
 	h.Scheduler = service.NewSchedulerService(queries, hub)
 	h.Scheduler.Bus = bus
 
@@ -81,6 +82,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	// Results reporter service (Phase 4) - reports run completions to channels and inboxes
 	resultsReporter := service.NewResultsReporterService(queries, hub, bus)
 	resultsReporter.Start()
+
+	// Mediation service — drives the Session page system agent.
+	mediationSvc := service.NewMediationService(queries, hub, bus)
+	mediationSvc.Start()
 
 	r := chi.NewRouter()
 
@@ -226,6 +231,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 
 			// System Agent
 			r.Get("/api/system-agent", h.GetOrCreateSystemAgent)
+
+			// Page system agents (account / session / project / file).
+			r.Get("/api/page-agents", h.ListPageAgents)
+			r.Get("/api/page-agents/{scope}", h.GetPageAgent)
 
 			// Attachments
 			r.Get("/api/attachments/{id}", h.GetAttachmentByID)

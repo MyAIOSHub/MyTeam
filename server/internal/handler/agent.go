@@ -14,26 +14,30 @@ import (
 )
 
 type AgentResponse struct {
-	ID                 string          `json:"id"`
-	WorkspaceID        string          `json:"workspace_id"`
-	RuntimeID          string          `json:"runtime_id"`
-	Name               string          `json:"name"`
-	Description        string          `json:"description"`
-	Instructions       string          `json:"instructions"`
-	AvatarURL          *string         `json:"avatar_url"`
-	RuntimeMode        string          `json:"runtime_mode"`
-	RuntimeConfig      any             `json:"runtime_config"`
-	Visibility         string          `json:"visibility"`
-	Status             string          `json:"status"`
-	MaxConcurrentTasks int32           `json:"max_concurrent_tasks"`
-	OwnerID            *string         `json:"owner_id"`
-	Skills             []SkillResponse `json:"skills"`
-	Tools              any             `json:"tools"`
-	Triggers           any             `json:"triggers"`
-	CreatedAt          string          `json:"created_at"`
-	UpdatedAt          string          `json:"updated_at"`
-	ArchivedAt         *string         `json:"archived_at"`
-	ArchivedBy         *string         `json:"archived_by"`
+	ID                   string          `json:"id"`
+	WorkspaceID          string          `json:"workspace_id"`
+	RuntimeID            string          `json:"runtime_id"`
+	Name                 string          `json:"name"`
+	Description          string          `json:"description"`
+	Instructions         string          `json:"instructions"`
+	AvatarURL            *string         `json:"avatar_url"`
+	RuntimeMode          string          `json:"runtime_mode"`
+	RuntimeConfig        any             `json:"runtime_config"`
+	Visibility           string          `json:"visibility"`
+	Status               string          `json:"status"`
+	MaxConcurrentTasks   int32           `json:"max_concurrent_tasks"`
+	OwnerID              *string         `json:"owner_id"`
+	Skills               []SkillResponse `json:"skills"`
+	Tools                any             `json:"tools"`
+	Triggers             any             `json:"triggers"`
+	CreatedAt            string          `json:"created_at"`
+	UpdatedAt            string          `json:"updated_at"`
+	ArchivedAt           *string         `json:"archived_at"`
+	ArchivedBy           *string         `json:"archived_by"`
+	AgentType            string          `json:"agent_type"`
+	PageScope            *string         `json:"page_scope"`
+	NeedsAttention       bool            `json:"needs_attention"`
+	NeedsAttentionReason *string         `json:"needs_attention_reason"`
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
@@ -62,26 +66,30 @@ func agentToResponse(a db.Agent) AgentResponse {
 	}
 
 	return AgentResponse{
-		ID:                 uuidToString(a.ID),
-		WorkspaceID:        uuidToString(a.WorkspaceID),
-		RuntimeID:          uuidToString(a.RuntimeID),
-		Name:               a.Name,
-		Description:        a.Description,
-		Instructions:       a.Instructions,
-		AvatarURL:          textToPtr(a.AvatarUrl),
-		RuntimeMode:        a.RuntimeMode,
-		RuntimeConfig:      rc,
-		Visibility:         a.Visibility,
-		Status:             a.Status,
-		MaxConcurrentTasks: a.MaxConcurrentTasks,
-		OwnerID:            uuidToPtr(a.OwnerID),
-		Skills:             []SkillResponse{},
-		Tools:              tools,
-		Triggers:           triggers,
-		CreatedAt:          timestampToString(a.CreatedAt),
-		UpdatedAt:          timestampToString(a.UpdatedAt),
-		ArchivedAt:         timestampToPtr(a.ArchivedAt),
-		ArchivedBy:         uuidToPtr(a.ArchivedBy),
+		ID:                   uuidToString(a.ID),
+		WorkspaceID:          uuidToString(a.WorkspaceID),
+		RuntimeID:            uuidToString(a.RuntimeID),
+		Name:                 a.Name,
+		Description:          a.Description,
+		Instructions:         a.Instructions,
+		AvatarURL:            textToPtr(a.AvatarUrl),
+		RuntimeMode:          a.RuntimeMode,
+		RuntimeConfig:        rc,
+		Visibility:           a.Visibility,
+		Status:               a.Status,
+		MaxConcurrentTasks:   a.MaxConcurrentTasks,
+		OwnerID:              uuidToPtr(a.OwnerID),
+		Skills:               []SkillResponse{},
+		Tools:                tools,
+		Triggers:             triggers,
+		CreatedAt:            timestampToString(a.CreatedAt),
+		UpdatedAt:            timestampToString(a.UpdatedAt),
+		ArchivedAt:           timestampToPtr(a.ArchivedAt),
+		ArchivedBy:           uuidToPtr(a.ArchivedBy),
+		AgentType:            a.AgentType,
+		PageScope:            textToPtr(a.PageScope),
+		NeedsAttention:       a.NeedsAttention,
+		NeedsAttentionReason: textToPtr(a.NeedsAttentionReason),
 	}
 }
 

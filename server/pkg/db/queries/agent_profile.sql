@@ -41,3 +41,23 @@ SELECT * FROM agent WHERE workspace_id = $1 AND is_system = TRUE LIMIT 1;
 INSERT INTO agent (workspace_id, name, description, status, is_system, owner_id, visibility)
 VALUES ($1, 'System Agent', 'Workspace system agent - manages defaults and automation', 'idle', TRUE, $2, 'workspace')
 RETURNING *;
+
+-- name: CreatePageSystemAgent :one
+INSERT INTO agent (workspace_id, name, description, instructions, status, is_system, owner_id, visibility, agent_type, page_scope)
+VALUES ($1, $2, $3, $4, 'idle', TRUE, $5, 'workspace', 'page_system_agent', $6)
+RETURNING *;
+
+-- name: GetPageSystemAgent :one
+SELECT * FROM agent
+WHERE workspace_id = $1 AND page_scope = $2 AND archived_at IS NULL
+LIMIT 1;
+
+-- name: ListPageSystemAgents :many
+SELECT * FROM agent
+WHERE workspace_id = $1 AND agent_type = 'page_system_agent' AND archived_at IS NULL
+ORDER BY page_scope ASC;
+
+-- name: SetAgentNeedsAttention :exec
+UPDATE agent
+SET needs_attention = $2, needs_attention_reason = $3
+WHERE id = $1;

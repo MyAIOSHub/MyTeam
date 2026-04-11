@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -193,15 +194,17 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auto-create system agent for the new workspace
+	// Auto-create system agent (and page system agents) for the new workspace.
 	go func() {
-		_, err := h.Queries.CreateSystemAgent(context.Background(), db.CreateSystemAgentParams{
+		ctx := context.Background()
+		ownerUUID := parseUUID(userID)
+		if _, err := h.Queries.CreateSystemAgent(ctx, db.CreateSystemAgentParams{
 			WorkspaceID: ws.ID,
-			OwnerID:     parseUUID(userID),
-		})
-		if err != nil {
+			OwnerID:     ownerUUID,
+		}); err != nil {
 			slog.Warn("auto-create system agent failed", "error", err)
 		}
+		service.EnsurePageAgents(ctx, h.Queries, ws.ID, ownerUUID)
 	}()
 
 	slog.Info("workspace created", append(logger.RequestAttrs(r), "workspace_id", uuidToString(ws.ID), "name", ws.Name, "slug", ws.Slug)...)
