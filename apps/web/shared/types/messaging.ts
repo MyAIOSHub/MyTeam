@@ -72,3 +72,20 @@ export interface Conversation {
   last_message?: Message;
   unread_count?: number;
 }
+
+export interface RemoteSession {
+  id: string;
+  agent_id: string;
+  title?: string;
+  status: string;
+  events?: RemoteSessionEvent[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RemoteSessionEvent {
+  id: string;
+  type: string;
+  data: Record<string, unknown>;
+  created_at: string;
+}

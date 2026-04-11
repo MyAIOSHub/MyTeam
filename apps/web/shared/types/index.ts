@@ -39,6 +39,8 @@ export type {
   Session,
   SessionParticipant,
   Conversation,
+  RemoteSession,
+  RemoteSessionEvent,
 } from "./messaging";
 export type {
   PlanStep,

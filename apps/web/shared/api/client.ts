@@ -35,6 +35,7 @@ import type {
   TimelineEntry,
   TaskMessagePayload,
   Attachment,
+  RemoteSession,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
@@ -653,4 +654,31 @@ export class ApiClient {
   async startWorkflow(id: string) { return this.fetch<any>(`/api/workflows/${id}/start`, { method: 'POST' }) }
   async updateWorkflowDAG(id: string, dag: any) { return this.fetch<any>(`/api/workflows/${id}/dag`, { method: 'PATCH', body: JSON.stringify({ dag }) }) }
   async deleteWorkflow(id: string) { return this.fetch<void>(`/api/workflows/${id}`, { method: 'DELETE' }) }
+
+  // Session Auto-Discussion
+  async startAutoDiscussion(sessionId: string): Promise<void> {
+    await this.fetch(`/api/sessions/${sessionId}/auto-start`, { method: "POST" });
+  }
+
+  async stopAutoDiscussion(sessionId: string): Promise<void> {
+    await this.fetch(`/api/sessions/${sessionId}/auto-stop`, { method: "POST" });
+  }
+
+  // Session Context
+  async shareSessionContext(sessionId: string, context: { files?: Array<{ name: string; content?: string }>; summary?: string; decision?: string }): Promise<void> {
+    await this.fetch(`/api/sessions/${sessionId}/context`, { method: "PUT", body: JSON.stringify(context) });
+  }
+
+  // Remote Sessions
+  async listRemoteSessions(): Promise<RemoteSession[]> {
+    return this.fetch("/api/remote-sessions");
+  }
+
+  async getRemoteSession(id: string): Promise<RemoteSession> {
+    return this.fetch(`/api/remote-sessions/${id}`);
+  }
+
+  async createRemoteSession(params: { agent_id: string; title?: string }): Promise<RemoteSession> {
+    return this.fetch("/api/remote-sessions", { method: "POST", body: JSON.stringify(params) });
+  }
 }

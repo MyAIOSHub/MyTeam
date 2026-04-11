@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSessionStore } from "@/features/sessions/store";
+import { RemoteSessionsList } from "@/features/sessions/components/remote-sessions-list";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 
 const STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-700",
@@ -43,79 +46,93 @@ export default function SessionsPage() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Sessions</h1>
-        <button
-          onClick={() => setShowCreate(!showCreate)}
-          className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium"
-        >
-          {showCreate ? "Cancel" : "New Session"}
-        </button>
-      </div>
+      <h1 className="text-2xl font-bold mb-6">Sessions</h1>
 
-      {showCreate && (
-        <form onSubmit={handleCreate} className="mb-6 p-4 border rounded-lg space-y-3">
-          <div>
-            <label className="block text-sm font-medium mb-1">Title</label>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-              placeholder="Bug triage for #42"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Max turns (optional)</label>
-            <input
-              value={maxTurns}
-              onChange={(e) => setMaxTurns(e.target.value)}
-              type="number"
-              min="1"
-              className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-              placeholder="10"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={creating || !title.trim()}
-            className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium disabled:opacity-50"
-          >
-            {creating ? "Creating..." : "Create Session"}
-          </button>
-        </form>
-      )}
+      <Tabs defaultValue="sessions">
+        <TabsList>
+          <TabsTrigger value="sessions">Sessions</TabsTrigger>
+          <TabsTrigger value="remote">Remote Sessions</TabsTrigger>
+        </TabsList>
 
-      {loading && sessions.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">Loading...</div>
-      ) : sessions.length === 0 ? (
-        <div className="text-center py-12">
-          <p className="text-muted-foreground mb-2">No sessions yet</p>
-          <p className="text-sm text-muted-foreground">
-            Create a session to start a multi-turn collaboration with agents about an issue.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {sessions.map((s) => (
-            <div
-              key={s.id}
-              onClick={() => router.push(`/sessions/${s.id}`)}
-              className="p-4 border rounded-lg hover:bg-muted/50 cursor-pointer"
+        <TabsContent value="sessions">
+          <div className="flex items-center justify-end mb-4">
+            <Button
+              onClick={() => setShowCreate(!showCreate)}
+              size="sm"
             >
-              <div className="flex items-center justify-between">
-                <div className="font-medium">{s.title}</div>
-                <span className={`text-xs px-2 py-0.5 rounded ${STATUS_COLORS[s.status] ?? "bg-gray-100"}`}>
-                  {s.status}
-                </span>
+              {showCreate ? "Cancel" : "New Session"}
+            </Button>
+          </div>
+
+          {showCreate && (
+            <form onSubmit={handleCreate} className="mb-6 p-4 border rounded-lg space-y-3">
+              <div>
+                <label className="block text-sm font-medium mb-1">Title</label>
+                <input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                  placeholder="Bug triage for #42"
+                  required
+                />
               </div>
-              <div className="text-sm text-muted-foreground mt-1">
-                Turn {s.current_turn}/{s.max_turns || "\u221E"} · Updated {new Date(s.updated_at).toLocaleString()}
+              <div>
+                <label className="block text-sm font-medium mb-1">Max turns (optional)</label>
+                <input
+                  value={maxTurns}
+                  onChange={(e) => setMaxTurns(e.target.value)}
+                  type="number"
+                  min="1"
+                  className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                  placeholder="10"
+                />
               </div>
+              <Button
+                type="submit"
+                disabled={creating || !title.trim()}
+                size="sm"
+              >
+                {creating ? "Creating..." : "Create Session"}
+              </Button>
+            </form>
+          )}
+
+          {loading && sessions.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">Loading...</div>
+          ) : sessions.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground mb-2">No sessions yet</p>
+              <p className="text-sm text-muted-foreground">
+                Create a session to start a multi-turn collaboration with agents about an issue.
+              </p>
             </div>
-          ))}
-        </div>
-      )}
+          ) : (
+            <div className="space-y-2">
+              {sessions.map((s) => (
+                <div
+                  key={s.id}
+                  onClick={() => router.push(`/sessions/${s.id}`)}
+                  className="p-4 border rounded-lg hover:bg-muted/50 cursor-pointer"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="font-medium">{s.title}</div>
+                    <span className={`text-xs px-2 py-0.5 rounded ${STATUS_COLORS[s.status] ?? "bg-gray-100"}`}>
+                      {s.status}
+                    </span>
+                  </div>
+                  <div className="text-sm text-muted-foreground mt-1">
+                    Turn {s.current_turn}/{s.max_turns || "\u221E"} · Updated {new Date(s.updated_at).toLocaleString()}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="remote">
+          <RemoteSessionsList />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
