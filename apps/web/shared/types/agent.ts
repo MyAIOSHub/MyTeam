@@ -194,3 +194,16 @@ export interface RuntimeUpdate {
   created_at: string;
   updated_at: string;
 }
+
+export interface AgentAutoReplyConfig {
+  enabled: boolean;
+  model?: string;
+  system_prompt?: string;
+}
+
+export interface AgentProfile {
+  display_name: string;
+  avatar?: string;
+  bio?: string;
+  tags?: string[];
+}

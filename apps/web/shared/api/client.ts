@@ -35,6 +35,8 @@ import type {
   TimelineEntry,
   TaskMessagePayload,
   Attachment,
+  AgentAutoReplyConfig,
+  AgentProfile,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
@@ -386,6 +388,30 @@ export class ApiClient {
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
       method: "POST",
+    });
+  }
+
+  // Agent Auto-Reply
+  async getAgentAutoReply(agentId: string): Promise<AgentAutoReplyConfig> {
+    return this.fetch(`/api/agents/${agentId}/auto-reply`);
+  }
+
+  async updateAgentAutoReply(agentId: string, config: Partial<AgentAutoReplyConfig>): Promise<AgentAutoReplyConfig> {
+    return this.fetch(`/api/agents/${agentId}/auto-reply`, {
+      method: "PATCH",
+      body: JSON.stringify(config),
+    });
+  }
+
+  // Agent Profile
+  async getAgentProfile(agentId: string): Promise<AgentProfile> {
+    return this.fetch(`/api/agents/${agentId}/profile`);
+  }
+
+  async updateAgentProfile(agentId: string, profile: Partial<AgentProfile>): Promise<AgentProfile> {
+    return this.fetch(`/api/agents/${agentId}/profile`, {
+      method: "PATCH",
+      body: JSON.stringify(profile),
     });
   }
 
