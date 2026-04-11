@@ -325,6 +325,14 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}/restore`, { method: "POST" });
   }
 
+  async listPageAgents(): Promise<Agent[]> {
+    return this.fetch("/api/page-agents");
+  }
+
+  async getPageAgent(scope: string): Promise<Agent> {
+    return this.fetch(`/api/page-agents/${scope}`);
+  }
+
   async listRuntimes(params?: { workspace_id?: string }): Promise<AgentRuntime[]> {
     const search = new URLSearchParams();
     const wsId = params?.workspace_id ?? this.workspaceId;

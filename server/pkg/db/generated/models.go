@@ -50,6 +50,10 @@ type Agent struct {
 	TriggerOnChannelMention pgtype.Bool        `json:"trigger_on_channel_mention"`
 	IsSystem                bool               `json:"is_system"`
 	SystemConfig            []byte             `json:"system_config"`
+	AgentType               string             `json:"agent_type"`
+	PageScope               pgtype.Text        `json:"page_scope"`
+	NeedsAttention          bool               `json:"needs_attention"`
+	NeedsAttentionReason    pgtype.Text        `json:"needs_attention_reason"`
 }
 
 type AgentRuntime struct {
