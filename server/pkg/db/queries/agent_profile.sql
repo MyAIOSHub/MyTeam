@@ -41,3 +41,23 @@ SELECT * FROM agent WHERE workspace_id = $1 AND is_system = TRUE LIMIT 1;
 INSERT INTO agent (workspace_id, name, description, status, is_system, owner_id, visibility)
 VALUES ($1, 'System Agent', 'Workspace system agent - manages defaults and automation', 'idle', TRUE, $2, 'workspace')
 RETURNING *;
+
+-- name: GetPersonalAgent :one
+SELECT * FROM agent
+WHERE workspace_id = $1 AND owner_id = $2 AND agent_type = 'personal_agent' AND archived_at IS NULL
+LIMIT 1;
+
+-- name: CreatePersonalAgent :one
+INSERT INTO agent (
+    workspace_id, name, description, runtime_mode, runtime_config,
+    runtime_id, visibility, status, max_concurrent_tasks, owner_id,
+    agent_type, cloud_llm_config, auto_reply_enabled, tools, triggers
+) VALUES ($1, $2, $3, 'cloud', '{}', $4, 'private', 'idle', 1, $5, 'personal_agent', $6, TRUE, '[]', $7)
+RETURNING *;
+
+-- name: UpdatePersonalAgentConfig :one
+UPDATE agent SET
+    cloud_llm_config = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;

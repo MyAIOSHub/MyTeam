@@ -30,6 +30,8 @@ type AgentResponse struct {
 	Skills             []SkillResponse `json:"skills"`
 	Tools              any             `json:"tools"`
 	Triggers           any             `json:"triggers"`
+	CloudLLMConfig     any             `json:"cloud_llm_config,omitempty"`
+	AgentType          string          `json:"agent_type,omitempty"`
 	CreatedAt          string          `json:"created_at"`
 	UpdatedAt          string          `json:"updated_at"`
 	ArchivedAt         *string         `json:"archived_at"`
@@ -61,6 +63,11 @@ func agentToResponse(a db.Agent) AgentResponse {
 		triggers = []any{}
 	}
 
+	var cloudCfg any
+	if a.CloudLlmConfig != nil {
+		json.Unmarshal(a.CloudLlmConfig, &cloudCfg)
+	}
+
 	return AgentResponse{
 		ID:                 uuidToString(a.ID),
 		WorkspaceID:        uuidToString(a.WorkspaceID),
@@ -78,6 +85,8 @@ func agentToResponse(a db.Agent) AgentResponse {
 		Skills:             []SkillResponse{},
 		Tools:              tools,
 		Triggers:           triggers,
+		CloudLLMConfig:     cloudCfg,
+		AgentType:          a.AgentType,
 		CreatedAt:          timestampToString(a.CreatedAt),
 		UpdatedAt:          timestampToString(a.UpdatedAt),
 		ArchivedAt:         timestampToPtr(a.ArchivedAt),

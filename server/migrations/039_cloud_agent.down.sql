@@ -1,0 +1,2 @@
+ALTER TABLE agent DROP COLUMN IF EXISTS cloud_llm_config;
+ALTER TABLE agent DROP COLUMN IF EXISTS agent_type;

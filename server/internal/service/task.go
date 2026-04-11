@@ -539,6 +539,10 @@ func agentToMap(a db.Agent) map[string]any {
 	if a.Triggers != nil {
 		json.Unmarshal(a.Triggers, &triggers)
 	}
+	var cloudCfg any
+	if a.CloudLlmConfig != nil {
+		json.Unmarshal(a.CloudLlmConfig, &cloudCfg)
+	}
 	return map[string]any{
 		"id":                   util.UUIDToString(a.ID),
 		"workspace_id":         util.UUIDToString(a.WorkspaceID),
@@ -555,6 +559,8 @@ func agentToMap(a db.Agent) map[string]any {
 		"skills":               []any{},
 		"tools":                tools,
 		"triggers":             triggers,
+		"cloud_llm_config":     cloudCfg,
+		"agent_type":           a.AgentType,
 		"created_at":           util.TimestampToString(a.CreatedAt),
 		"updated_at":           util.TimestampToString(a.UpdatedAt),
 		"archived_at":          util.TimestampToPtr(a.ArchivedAt),

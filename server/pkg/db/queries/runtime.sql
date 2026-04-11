@@ -52,6 +52,22 @@ WHERE status = 'online'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
 RETURNING id, workspace_id;
 
+-- name: GetCloudRuntime :one
+SELECT * FROM agent_runtime
+WHERE workspace_id = $1 AND runtime_mode = 'cloud' AND provider = 'cloud_llm'
+LIMIT 1;
+
+-- name: EnsureCloudRuntime :one
+INSERT INTO agent_runtime (
+    workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+) VALUES ($1, 'cloud', 'Cloud LLM', 'cloud', 'cloud_llm', 'online', 'cloud', '{}', now())
+ON CONFLICT (workspace_id, daemon_id, provider)
+DO UPDATE SET
+    status = 'online',
+    last_seen_at = now(),
+    updated_at = now()
+RETURNING *;
+
 -- name: FailTasksForOfflineRuntimes :many
 -- Marks dispatched/running tasks as failed when their runtime is offline.
 -- This cleans up orphaned tasks after a daemon crash or network partition.

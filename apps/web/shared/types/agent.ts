@@ -54,6 +54,12 @@ export interface AgentTask {
   created_at: string;
 }
 
+export interface CloudLLMConfig {
+  endpoint?: string;
+  api_key?: string;
+  model?: string;
+}
+
 export interface Agent {
   id: string;
   workspace_id: string;
@@ -71,6 +77,8 @@ export interface Agent {
   skills: Skill[];
   tools: AgentTool[];
   triggers: AgentTrigger[];
+  cloud_llm_config?: CloudLLMConfig;
+  agent_type?: string;
   created_at: string;
   updated_at: string;
   archived_at: string | null;

@@ -653,4 +653,16 @@ export class ApiClient {
   async startWorkflow(id: string) { return this.fetch<any>(`/api/workflows/${id}/start`, { method: 'POST' }) }
   async updateWorkflowDAG(id: string, dag: any) { return this.fetch<any>(`/api/workflows/${id}/dag`, { method: 'PATCH', body: JSON.stringify({ dag }) }) }
   async deleteWorkflow(id: string) { return this.fetch<void>(`/api/workflows/${id}`, { method: 'DELETE' }) }
+
+  // Personal Agent
+  async getPersonalAgent(): Promise<Agent> {
+    return this.fetch<Agent>("/api/personal-agent");
+  }
+
+  async updatePersonalAgentConfig(config: Record<string, unknown>): Promise<Agent> {
+    return this.fetch<Agent>("/api/personal-agent/config", {
+      method: "PATCH",
+      body: JSON.stringify({ cloud_llm_config: config }),
+    });
+  }
 }
