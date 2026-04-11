@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Paperclip, X, FileIcon, Loader2 } from "lucide-react";
 import { api } from "@/shared/api";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ interface MessageInputProps {
   onSend: (content: string, fileInfo?: { file_id: string; file_name: string; file_size: number; file_content_type: string }) => Promise<void>;
   placeholder?: string;
   disabled?: boolean;
+  onTyping?: (isTyping: boolean) => void;
 }
 
 function formatSize(bytes: number): string {
@@ -22,16 +23,29 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const STOP_TYPING_DELAY_MS = 2000;
+
 export function MessageInput({
   onSend,
   placeholder = "输入消息...",
   disabled,
+  onTyping,
 }: MessageInputProps) {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [attachments, setAttachments] = useState<AttachmentPreview[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const stopTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (stopTypingTimerRef.current) {
+        clearTimeout(stopTypingTimerRef.current);
+      }
+    };
+  }, []);
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
@@ -51,9 +65,49 @@ export function MessageInput({
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }
 
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setInput(e.target.value);
+
+      if (onTyping) {
+        onTyping(true);
+
+        // Reset the stop-typing timer
+        if (stopTypingTimerRef.current) {
+          clearTimeout(stopTypingTimerRef.current);
+        }
+        stopTypingTimerRef.current = setTimeout(() => {
+          onTyping(false);
+          stopTypingTimerRef.current = null;
+        }, STOP_TYPING_DELAY_MS);
+      }
+    },
+    [onTyping],
+  );
+
+  const handleBlur = useCallback(() => {
+    if (onTyping) {
+      onTyping(false);
+      if (stopTypingTimerRef.current) {
+        clearTimeout(stopTypingTimerRef.current);
+        stopTypingTimerRef.current = null;
+      }
+    }
+  }, [onTyping]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if ((!input.trim() && attachments.length === 0) || sending) return;
+
+    // Stop typing indicator on send
+    if (onTyping) {
+      onTyping(false);
+      if (stopTypingTimerRef.current) {
+        clearTimeout(stopTypingTimerRef.current);
+        stopTypingTimerRef.current = null;
+      }
+    }
+
     setSending(true);
 
     try {
@@ -142,7 +196,8 @@ export function MessageInput({
         {/* Text input */}
         <input
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={handleChange}
+          onBlur={handleBlur}
           className="flex-1 px-4 py-2 bg-muted border rounded-md text-sm"
           placeholder={placeholder}
           disabled={disabled}

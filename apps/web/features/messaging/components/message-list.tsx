@@ -1,6 +1,8 @@
 "use client";
 import { MessageSquare } from "lucide-react";
 
+import { useWorkspaceStore } from "@/features/workspace";
+
 interface MessageListProps {
   messages: Array<{
     id: string;
@@ -15,9 +17,17 @@ interface MessageListProps {
   }>;
   currentUserId?: string;
   onOpenThread?: (messageId: string) => void;
+  typingUsers?: string[];
 }
 
-export function MessageList({ messages, currentUserId, onOpenThread }: MessageListProps) {
+export function MessageList({ messages, currentUserId, onOpenThread, typingUsers = [] }: MessageListProps) {
+  const members = useWorkspaceStore((s) => s.members);
+
+  const resolveDisplayName = (senderId: string): string => {
+    const member = members.find((m) => m.user_id === senderId);
+    return member?.name ?? senderId.slice(0, 12);
+  };
+
   return (
     <div className="flex-1 overflow-auto p-4 space-y-1">
       {messages.map((msg) => (
@@ -35,7 +45,7 @@ export function MessageList({ messages, currentUserId, onOpenThread }: MessageLi
               {/* Header: sender + time */}
               <div className="flex items-center gap-2 mb-0.5">
                 <span className="text-[13px] font-medium text-foreground">
-                  {msg.sender_id.slice(0, 12)}
+                  {resolveDisplayName(msg.sender_id)}
                 </span>
                 {msg.is_impersonated && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">附身</span>
@@ -87,6 +97,38 @@ export function MessageList({ messages, currentUserId, onOpenThread }: MessageLi
           暂无消息
         </div>
       )}
+      {typingUsers.length > 0 && (
+        <TypingIndicator typingUsers={typingUsers} resolveDisplayName={resolveDisplayName} />
+      )}
+    </div>
+  );
+}
+
+function TypingIndicator({
+  typingUsers,
+  resolveDisplayName,
+}: {
+  typingUsers: string[];
+  resolveDisplayName: (id: string) => string;
+}) {
+  const names = typingUsers.map(resolveDisplayName);
+  let label: string;
+  if (names.length === 1) {
+    label = `${names[0]} is typing`;
+  } else if (names.length === 2) {
+    label = `${names[0]} and ${names[1]} are typing`;
+  } else {
+    label = `${names[0]} and ${names.length - 1} others are typing`;
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 px-4 py-1 text-xs text-muted-foreground">
+      <span>{label}</span>
+      <span className="inline-flex gap-0.5">
+        <span className="animate-bounce [animation-delay:0ms]">&middot;</span>
+        <span className="animate-bounce [animation-delay:150ms]">&middot;</span>
+        <span className="animate-bounce [animation-delay:300ms]">&middot;</span>
+      </span>
     </div>
   );
 }
