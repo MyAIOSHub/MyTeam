@@ -71,4 +71,10 @@ const (
 
 	// Plan events
 	EventPlanGenerated = "plan:generated"
+
+	// Channel events
+	EventChannelUpdated = "channel:updated"
+
+	// Thread events
+	EventThreadCreated = "thread:created"
 )
