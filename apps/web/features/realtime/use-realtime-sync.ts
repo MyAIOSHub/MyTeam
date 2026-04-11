@@ -62,6 +62,15 @@ export function useRealtimeSync(ws: WSClient | null) {
         });
       },
       skill: () => void useWorkspaceStore.getState().refreshSkills(),
+      run: () => {
+        const currentProject = useProjectStore.getState().currentProject;
+        if (currentProject) {
+          useProjectStore.getState().fetchRuns(currentProject.id);
+        }
+        useProjectStore.getState().fetch();
+      },
+      plan: () => void useProjectStore.getState().fetch(),
+      project: () => void useProjectStore.getState().fetch(),
       channel: () => {
         // Import dynamically to avoid circular deps with the realtime feature.
         import("@/features/channels/store")
@@ -232,6 +241,7 @@ export function useRealtimeSync(ws: WSClient | null) {
           useWorkspaceStore.getState().refreshAgents(),
           useWorkspaceStore.getState().refreshMembers(),
           useWorkspaceStore.getState().refreshSkills(),
+          useProjectStore.getState().fetch(),
         ]);
       } catch (e) {
         logger.error("reconnect refetch failed", e);
