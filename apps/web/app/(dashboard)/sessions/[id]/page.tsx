@@ -5,6 +5,8 @@ import { useParams } from "next/navigation";
 import { useSessionStore } from "@/features/sessions/store";
 import { MessageList } from "@/features/messaging/components/message-list";
 import { MessageInput } from "@/features/messaging/components/message-input";
+import { AutoDiscussionToggle } from "@/features/sessions/components/auto-discussion-toggle";
+import { SessionContextPanel } from "@/features/sessions/components/session-context-panel";
 import { api } from "@/shared/api";
 import { toast } from "sonner";
 
@@ -47,7 +49,6 @@ export default function SessionDetailPage() {
     }
   }
 
-  const ctx = currentSession?.context;
   const isTerminal = currentSession?.status === "completed" || currentSession?.status === "failed" || currentSession?.status === "archived";
 
   return (
@@ -70,12 +71,15 @@ export default function SessionDetailPage() {
               )}
             </div>
           </div>
-          <button
-            onClick={() => setShowContext(!showContext)}
-            className="px-3 py-1 text-sm border rounded-md hover:bg-muted/50"
-          >
-            {showContext ? "隐藏上下文" : "上下文"}
-          </button>
+          <div className="flex items-center gap-3">
+            {id && !isTerminal && <AutoDiscussionToggle sessionId={id} />}
+            <button
+              onClick={() => setShowContext(!showContext)}
+              className="px-3 py-1 text-sm border rounded-md hover:bg-muted/50"
+            >
+              {showContext ? "Hide Context" : "Context"}
+            </button>
+          </div>
         </div>
 
         {/* Messages (turn-by-turn) */}
@@ -87,62 +91,8 @@ export default function SessionDetailPage() {
         />
       </div>
 
-      {/* Context sidebar */}
-      {showContext && ctx && (
-        <div className="w-72 border-l flex flex-col overflow-auto">
-          <div className="p-4 border-b">
-            <h3 className="font-medium text-sm">会话上下文</h3>
-          </div>
-          <div className="p-4 space-y-4 text-sm">
-            {ctx.topic && (
-              <div>
-                <div className="font-medium text-muted-foreground mb-1">主题</div>
-                <div>{ctx.topic}</div>
-              </div>
-            )}
-            {ctx.summary && (
-              <div>
-                <div className="font-medium text-muted-foreground mb-1">摘要</div>
-                <div>{ctx.summary}</div>
-              </div>
-            )}
-            {ctx.decisions && ctx.decisions.length > 0 && (
-              <div>
-                <div className="font-medium text-muted-foreground mb-1">决策</div>
-                <ul className="list-disc pl-4 space-y-1">
-                  {ctx.decisions.map((d, i) => (
-                    <li key={i}>
-                      {d.decision}
-                      <span className="text-xs text-muted-foreground ml-1">- {d.by}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {ctx.files && ctx.files.length > 0 && (
-              <div>
-                <div className="font-medium text-muted-foreground mb-1">文件</div>
-                <ul className="space-y-1">
-                  {ctx.files.map((f, i) => (
-                    <li key={i} className="text-xs bg-muted px-2 py-1 rounded">{f.name}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {ctx.code_snippets && ctx.code_snippets.length > 0 && (
-              <div>
-                <div className="font-medium text-muted-foreground mb-1">代码片段</div>
-                {ctx.code_snippets.map((s, i) => (
-                  <div key={i} className="mb-2">
-                    <div className="text-xs text-muted-foreground">{s.description} ({s.language})</div>
-                    <pre className="text-xs bg-muted p-2 rounded mt-1 overflow-auto">{s.code}</pre>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Context sidebar with sharing capabilities */}
+      {showContext && id && <SessionContextPanel sessionId={id} />}
     </div>
   );
 }

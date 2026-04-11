@@ -47,6 +47,7 @@ import type {
   WorkspaceMetrics,
   AgentAutoReplyConfig,
   AgentProfile,
+  RemoteSession,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
@@ -860,5 +861,32 @@ export class ApiClient {
   // Metrics
   async getWorkspaceMetrics(): Promise<WorkspaceMetrics> {
     return this.fetch("/api/metrics");
+  }
+
+  // Session Auto-Discussion
+  async startAutoDiscussion(sessionId: string): Promise<void> {
+    await this.fetch(`/api/sessions/${sessionId}/auto-start`, { method: "POST" });
+  }
+
+  async stopAutoDiscussion(sessionId: string): Promise<void> {
+    await this.fetch(`/api/sessions/${sessionId}/auto-stop`, { method: "POST" });
+  }
+
+  // Session Context
+  async shareSessionContext(sessionId: string, context: { files?: Array<{ name: string; content?: string }>; summary?: string; decision?: string }): Promise<void> {
+    await this.fetch(`/api/sessions/${sessionId}/context`, { method: "PUT", body: JSON.stringify(context) });
+  }
+
+  // Remote Sessions
+  async listRemoteSessions(): Promise<RemoteSession[]> {
+    return this.fetch("/api/remote-sessions");
+  }
+
+  async getRemoteSession(id: string): Promise<RemoteSession> {
+    return this.fetch(`/api/remote-sessions/${id}`);
+  }
+
+  async createRemoteSession(params: { agent_id: string; title?: string }): Promise<RemoteSession> {
+    return this.fetch("/api/remote-sessions", { method: "POST", body: JSON.stringify(params) });
   }
 }

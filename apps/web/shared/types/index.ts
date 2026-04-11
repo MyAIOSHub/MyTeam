@@ -46,6 +46,8 @@ export type {
   SessionParticipant,
   Conversation,
   Thread,
+  RemoteSession,
+  RemoteSessionEvent,
 } from "./messaging";
 export type {
   PlanStep,
