@@ -8,9 +8,11 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import {
   Bot, Terminal, Code, Key, ChevronDown, ChevronRight,
   Copy, Check, Plus, Zap, Circle, Shield, Wrench,
-  Globe, User, GitBranch
+  Globe, User, GitBranch, Settings
 } from "lucide-react"
 import { MetricsOverview } from "@/features/workspace/components/metrics-overview"
+import { AgentAutoReplyConfig } from "@/features/workspace/components/agent-auto-reply-config"
+import { AgentProfileEditor } from "@/features/workspace/components/agent-profile-editor"
 
 /* ================================================================== */
 /* Helpers                                                             */
@@ -163,6 +165,7 @@ function OverviewTab() {
 function AgentListTab() {
   const agents = useWorkspaceStore(s => s.agents)
   const list = Array.isArray(agents) ? agents : []
+  const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null)
 
   const impersonate = (id: string) => {
     localStorage.setItem("multica_impersonate_agent", id)
@@ -177,36 +180,51 @@ function AgentListTab() {
           {list.map(a => {
             const s = getStatus(a.status as string)
             return (
-              <div key={a.id} className="border border-border rounded-[8px] bg-card p-4 hover:bg-secondary/30 transition-colors space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="h-9 w-9 rounded-[8px] bg-primary/10 flex items-center justify-center shrink-0">
-                    <Bot className="h-4 w-4 text-primary" />
+              <div key={a.id} className="border border-border rounded-[8px] bg-card overflow-hidden hover:bg-secondary/30 transition-colors">
+                <div className="p-4 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-[8px] bg-primary/10 flex items-center justify-center shrink-0">
+                      <Bot className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[14px] font-medium text-foreground truncate">{a.name}</div>
+                      <div className="text-[12px] text-muted-foreground truncate">{a.description || "暂无描述"}</div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className={`h-[7px] w-[7px] rounded-full ${s.dot}`} />
+                      <span className="text-[11px] text-muted-foreground">{s.label}</span>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[14px] font-medium text-foreground truncate">{a.name}</div>
-                    <div className="text-[12px] text-muted-foreground truncate">{a.description || "暂无描述"}</div>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <span className={`h-[7px] w-[7px] rounded-full ${s.dot}`} />
-                    <span className="text-[11px] text-muted-foreground">{s.label}</span>
+                  {(a.skills?.length > 0 || (a.identity_card?.skills?.length ?? 0) > 0) && (
+                    <div className="flex flex-wrap gap-1">
+                      {(a.identity_card?.skills ?? a.skills?.map(s => s.name) ?? []).slice(0, 5).map((t: string) => (
+                        <span key={t} className="text-[11px] px-2 py-[2px] rounded-full border border-border text-secondary-foreground bg-secondary/50">{t}</span>
+                      ))}
+                    </div>
+                  )}
+                  {(a.identity_card?.tools?.length ?? 0) > 0 && (
+                    <div className="text-[12px] text-muted-foreground flex items-center gap-1.5">
+                      <Wrench className="h-3 w-3" /><span>{a.identity_card?.tools?.join(" · ")}</span>
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <button onClick={() => setExpandedAgentId(expandedAgentId === a.id ? null : a.id)}
+                      className="flex-1 text-[12px] font-medium text-muted-foreground border border-border rounded-[6px] px-3 py-1.5 hover:bg-secondary/50 transition-colors flex items-center justify-center gap-1.5">
+                      <Settings className="h-3 w-3" />
+                      {expandedAgentId === a.id ? "隐藏配置" : "配置"}
+                    </button>
+                    <button onClick={() => impersonate(a.id)}
+                      className="flex-1 text-[12px] font-medium text-primary border border-border rounded-[6px] px-3 py-1.5 hover:bg-secondary/50 transition-colors">
+                      附身代理
+                    </button>
                   </div>
                 </div>
-                {(a.skills?.length > 0 || (a.identity_card?.skills?.length ?? 0) > 0) && (
-                  <div className="flex flex-wrap gap-1">
-                    {(a.identity_card?.skills ?? a.skills?.map(s => s.name) ?? []).slice(0, 5).map((t: string) => (
-                      <span key={t} className="text-[11px] px-2 py-[2px] rounded-full border border-border text-secondary-foreground bg-secondary/50">{t}</span>
-                    ))}
+                {expandedAgentId === a.id && (
+                  <div className="border-t px-4 py-4 space-y-4 bg-muted/20">
+                    <AgentProfileEditor agentId={a.id} />
+                    <AgentAutoReplyConfig agentId={a.id} />
                   </div>
                 )}
-                {(a.identity_card?.tools?.length ?? 0) > 0 && (
-                  <div className="text-[12px] text-muted-foreground flex items-center gap-1.5">
-                    <Wrench className="h-3 w-3" /><span>{a.identity_card?.tools?.join(" · ")}</span>
-                  </div>
-                )}
-                <button onClick={() => impersonate(a.id)}
-                  className="w-full text-[12px] font-medium text-primary border border-border rounded-[6px] px-3 py-1.5 hover:bg-secondary/50 transition-colors">
-                  附身代理
-                </button>
               </div>
             )
           })}
