@@ -15,16 +15,67 @@ import (
 	"time"
 )
 
+const (
+	defaultReleaseRepo = "dy9759/MyTeam"
+	defaultBrewFormula = "multica-ai/tap/myteam"
+)
+
 // GitHubRelease is the subset of the GitHub releases API response we need.
 type GitHubRelease struct {
-	TagName string `json:"tag_name"`
-	HTMLURL string `json:"html_url"`
+	TagName    string `json:"tag_name"`
+	HTMLURL    string `json:"html_url"`
+	Prerelease bool   `json:"prerelease"`
+	Draft      bool   `json:"draft"`
 }
 
-// FetchLatestRelease fetches the latest release tag from the multica GitHub repo.
+func resolveReleaseRepo() string {
+	if repo := strings.TrimSpace(os.Getenv("MYTEAM_RELEASE_REPO")); repo != "" {
+		return repo
+	}
+	return defaultReleaseRepo
+}
+
+func resolveBrewFormula() string {
+	if formula := strings.TrimSpace(os.Getenv("MYTEAM_BREW_FORMULA")); formula != "" {
+		return formula
+	}
+	return defaultBrewFormula
+}
+
+func releaseListAPIURL() string {
+	return fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=20", resolveReleaseRepo())
+}
+
+func releaseDownloadURL(tag, assetName string) string {
+	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", resolveReleaseRepo(), tag, assetName)
+}
+
+func selectPreferredRelease(releases []GitHubRelease) *GitHubRelease {
+	for i := range releases {
+		release := &releases[i]
+		if release.Draft {
+			continue
+		}
+		if !release.Prerelease {
+			return release
+		}
+	}
+
+	for i := range releases {
+		release := &releases[i]
+		if release.Draft {
+			continue
+		}
+		return release
+	}
+
+	return nil
+}
+
+// FetchLatestRelease fetches the latest release tag from the current GitHub release repo.
 func FetchLatestRelease() (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/latest", nil)
+	req, err := http.NewRequest(http.MethodGet, releaseListAPIURL(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -40,14 +91,18 @@ func FetchLatestRelease() (*GitHubRelease, error) {
 		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
 	}
 
-	var release GitHubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+	var releases []GitHubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
 		return nil, err
 	}
-	return &release, nil
+	release := selectPreferredRelease(releases)
+	if release == nil {
+		return nil, fmt.Errorf("no releases found for %s", resolveReleaseRepo())
+	}
+	return release, nil
 }
 
-// IsBrewInstall checks whether the running multica binary was installed via Homebrew.
+// IsBrewInstall checks whether the running myteam binary was installed via Homebrew.
 func IsBrewInstall() bool {
 	exePath, err := os.Executable()
 	if err != nil {
@@ -80,10 +135,10 @@ func GetBrewPrefix() string {
 	return strings.TrimSpace(string(out))
 }
 
-// UpdateViaBrew runs `brew upgrade multica-ai/tap/multica`.
+// UpdateViaBrew runs the Homebrew upgrade command for MyTeam.
 // Returns the combined output and any error.
 func UpdateViaBrew() (string, error) {
-	cmd := exec.Command("brew", "upgrade", "multica-ai/tap/multica")
+	cmd := exec.Command("brew", "upgrade", resolveBrewFormula())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("brew upgrade failed: %w", err)
@@ -104,13 +159,13 @@ func UpdateViaDownload(targetVersion string) (string, error) {
 		return "", fmt.Errorf("resolve symlink: %w", err)
 	}
 
-	// Build download URL: multica_{os}_{arch}.tar.gz
+	// Build download URL: myteam_{os}_{arch}.tar.gz
 	tag := targetVersion
 	if !strings.HasPrefix(tag, "v") {
 		tag = "v" + tag
 	}
-	assetName := fmt.Sprintf("multica_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
-	downloadURL := fmt.Sprintf("https://github.com/multica-ai/multica/releases/download/%s/%s", tag, assetName)
+	assetName := fmt.Sprintf("myteam_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	downloadURL := releaseDownloadURL(tag, assetName)
 
 	// Download the tarball.
 	client := &http.Client{Timeout: 120 * time.Second}
@@ -124,15 +179,15 @@ func UpdateViaDownload(targetVersion string) (string, error) {
 		return "", fmt.Errorf("download failed: HTTP %d from %s", resp.StatusCode, downloadURL)
 	}
 
-	// Extract the "multica" binary from the tarball.
-	binaryData, err := extractBinaryFromTarGz(resp.Body, "multica")
+	// Extract the "myteam" binary from the tarball.
+	binaryData, err := extractBinaryFromTarGz(resp.Body, "myteam")
 	if err != nil {
 		return "", fmt.Errorf("extract binary: %w", err)
 	}
 
 	// Atomic replace: write to temp file, then rename over the original.
 	dir := filepath.Dir(exePath)
-	tmpFile, err := os.CreateTemp(dir, "multica-update-*")
+	tmpFile, err := os.CreateTemp(dir, "myteam-update-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
@@ -193,4 +248,3 @@ func extractBinaryFromTarGz(r io.Reader, name string) ([]byte, error) {
 		}
 	}
 }
-
