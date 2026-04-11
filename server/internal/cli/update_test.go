@@ -35,6 +35,24 @@ func TestResolveBrewFormulaSupportsOverride(t *testing.T) {
 	}
 }
 
+func TestResolveGitHubTokenPrefersMyTeamToken(t *testing.T) {
+	t.Setenv("MYTEAM_GITHUB_TOKEN", "myteam-token")
+	t.Setenv("GITHUB_TOKEN", "github-token")
+
+	if got := resolveGitHubToken(); got != "myteam-token" {
+		t.Fatalf("resolveGitHubToken() = %q", got)
+	}
+}
+
+func TestResolveGitHubTokenFallsBackToGitHubToken(t *testing.T) {
+	t.Setenv("MYTEAM_GITHUB_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "github-token")
+
+	if got := resolveGitHubToken(); got != "github-token" {
+		t.Fatalf("resolveGitHubToken() = %q", got)
+	}
+}
+
 func TestSelectPreferredReleasePrefersStable(t *testing.T) {
 	releases := []GitHubRelease{
 		{TagName: "v0.2.0-beta.2", Prerelease: true},

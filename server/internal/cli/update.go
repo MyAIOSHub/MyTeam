@@ -42,6 +42,15 @@ func resolveBrewFormula() string {
 	return defaultBrewFormula
 }
 
+func resolveGitHubToken() string {
+	for _, key := range []string{"MYTEAM_GITHUB_TOKEN", "GITHUB_TOKEN"} {
+		if token := strings.TrimSpace(os.Getenv(key)); token != "" {
+			return token
+		}
+	}
+	return ""
+}
+
 func releaseListAPIURL() string {
 	return fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=20", resolveReleaseRepo())
 }
@@ -80,6 +89,9 @@ func FetchLatestRelease() (*GitHubRelease, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
+	if token := resolveGitHubToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
