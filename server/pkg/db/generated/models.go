@@ -50,6 +50,7 @@ type Agent struct {
 	TriggerOnChannelMention pgtype.Bool        `json:"trigger_on_channel_mention"`
 	IsSystem                bool               `json:"is_system"`
 	SystemConfig            []byte             `json:"system_config"`
+	CloudLlmConfig          []byte             `json:"cloud_llm_config"`
 	AgentType               string             `json:"agent_type"`
 	OnlineStatus            string             `json:"online_status"`
 	WorkloadStatus          string             `json:"workload_status"`

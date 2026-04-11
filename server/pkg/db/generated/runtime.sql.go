@@ -11,6 +11,38 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const ensureCloudRuntime = `-- name: EnsureCloudRuntime :one
+INSERT INTO agent_runtime (
+    workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+) VALUES ($1, 'cloud', 'Cloud LLM', 'cloud', 'cloud_llm', 'online', 'cloud', '{}', now())
+ON CONFLICT (workspace_id, daemon_id, provider)
+DO UPDATE SET
+    status = 'online',
+    last_seen_at = now(),
+    updated_at = now()
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at
+`
+
+func (q *Queries) EnsureCloudRuntime(ctx context.Context, workspaceID pgtype.UUID) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, ensureCloudRuntime, workspaceID)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const failTasksForOfflineRuntimes = `-- name: FailTasksForOfflineRuntimes :many
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'runtime went offline'
@@ -86,6 +118,32 @@ type GetAgentRuntimeForWorkspaceParams struct {
 
 func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentRuntimeForWorkspaceParams) (AgentRuntime, error) {
 	row := q.db.QueryRow(ctx, getAgentRuntimeForWorkspace, arg.ID, arg.WorkspaceID)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getCloudRuntime = `-- name: GetCloudRuntime :one
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at FROM agent_runtime
+WHERE workspace_id = $1 AND runtime_mode = 'cloud' AND provider = 'cloud_llm'
+LIMIT 1
+`
+
+func (q *Queries) GetCloudRuntime(ctx context.Context, workspaceID pgtype.UUID) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, getCloudRuntime, workspaceID)
 	var i AgentRuntime
 	err := row.Scan(
 		&i.ID,

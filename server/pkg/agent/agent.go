@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/llmclient"
 )
 
 // Backend is the unified interface for executing prompts via coding agents.
@@ -79,7 +81,7 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex", "opencode".
+// Supported types: "claude", "codex", "opencode", "cloud".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -93,8 +95,13 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "opencode":
 		return &opencodeBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, opencode)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, opencode, cloud)", agentType)
 	}
+}
+
+// NewCloudBackend creates a Backend that uses an LLM API for execution.
+func NewCloudBackend(llmCfg llmclient.Config) Backend {
+	return &CloudBackend{LLM: llmclient.New(llmCfg)}
 }
 
 // DetectVersion runs the agent CLI with --version and returns the output.

@@ -72,6 +72,12 @@ export interface AgentTask {
 
 export type PageAgentScope = "account" | "session" | "project" | "file";
 
+export interface CloudLLMConfig {
+  endpoint?: string;
+  api_key?: string;
+  model?: string;
+}
+
 export interface Agent {
   id: string;
   workspace_id: string;
@@ -94,11 +100,11 @@ export interface Agent {
   skills: Skill[];
   tools: AgentTool[];
   triggers: AgentTrigger[];
+  cloud_llm_config?: CloudLLMConfig;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
   archived_by: string | null;
-  agent_type?: string;
   page_scope?: PageAgentScope | null;
   needs_attention?: boolean;
   needs_attention_reason?: string | null;

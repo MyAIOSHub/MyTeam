@@ -902,4 +902,16 @@ export class ApiClient {
   async createRemoteSession(params: { agent_id: string; title?: string }): Promise<RemoteSession> {
     return this.fetch("/api/remote-sessions", { method: "POST", body: JSON.stringify(params) });
   }
+
+  // Personal Agent
+  async getPersonalAgent(): Promise<Agent> {
+    return this.fetch<Agent>("/api/personal-agent");
+  }
+
+  async updatePersonalAgentConfig(config: Record<string, unknown>): Promise<Agent> {
+    return this.fetch<Agent>("/api/personal-agent/config", {
+      method: "PATCH",
+      body: JSON.stringify({ cloud_llm_config: config }),
+    });
+  }
 }

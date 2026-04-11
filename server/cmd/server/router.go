@@ -61,6 +61,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	// Start auto-reply poll daemon
 	go h.AutoReplyService.StartPollDaemon(context.Background())
 
+	// Start cloud executor service
+	cloudExecutor := service.NewCloudExecutorService(queries, hub, bus, h.TaskService)
+	cloudExecutor.Start(context.Background())
+
 	// Audit + notification services
 	auditSvc := service.NewAuditService(queries)
 	auditSvc.SubscribeToEvents(bus)
@@ -235,6 +239,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 			// Page system agents (account / session / project / file).
 			r.Get("/api/page-agents", h.ListPageAgents)
 			r.Get("/api/page-agents/{scope}", h.GetPageAgent)
+
+			// Personal Agent
+			r.Get("/api/personal-agent", h.GetPersonalAgent)
+			r.Patch("/api/personal-agent/config", h.UpdatePersonalAgentConfig)
 
 			// Attachments
 			r.Get("/api/attachments/{id}", h.GetAttachmentByID)

@@ -12,7 +12,8 @@ import (
 
 // GetOrCreateSystemAgent — GET /api/system-agent
 // Returns the workspace system agent, creating one if it doesn't exist.
-// Also ensures the page system agents are present for the workspace.
+// Also ensures the page system agents are present for the workspace
+// and a personal agent exists for the current user.
 func (h *Handler) GetOrCreateSystemAgent(w http.ResponseWriter, r *http.Request) {
 	workspaceID := resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
@@ -22,6 +23,17 @@ func (h *Handler) GetOrCreateSystemAgent(w http.ResponseWriter, r *http.Request)
 
 	wsUUID := parseUUID(workspaceID)
 	ownerUUID := parseUUID(userID)
+
+	// Ensure personal agent exists for the user (fire-and-forget).
+	go func() {
+		user, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+		if err != nil {
+			return
+		}
+		if _, err := service.EnsurePersonalAgent(r.Context(), h.Queries, wsUUID, ownerUUID, user.Name); err != nil {
+			slog.Debug("ensure personal agent failed", "error", err)
+		}
+	}()
 
 	// Try to get existing
 	agent, err := h.Queries.GetSystemAgent(r.Context(), wsUUID)

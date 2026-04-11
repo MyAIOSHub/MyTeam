@@ -181,3 +181,11 @@ ORDER BY created_at DESC;
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: ListCloudPendingTasks :many
+SELECT atq.* FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE atq.status IN ('queued', 'dispatched')
+  AND a.runtime_mode = 'cloud'
+ORDER BY atq.priority DESC, atq.created_at ASC
+LIMIT 20;
