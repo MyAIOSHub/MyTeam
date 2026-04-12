@@ -95,46 +95,60 @@ func (s *ResultsReporterService) handleRunCompleted(e events.Event) {
 // 6. Create inbox notifications for all project participants.
 // 7. Update project status to "completed".
 func (s *ResultsReporterService) reportRunCompletion(ctx context.Context, workspaceID, runID string) {
-	// TODO: Step 1 - Get the project run once project_run table exists:
-	//   run, err := s.Queries.GetProjectRun(ctx, util.ParseUUID(runID))
-	//   if err != nil {
-	//       slog.Error("results reporter: failed to get project run", "run_id", runID, "error", err)
-	//       return
-	//   }
-	//   projectID := util.UUIDToString(run.ProjectID)
+	// Step 1: Get the project run.
+	run, err := s.Queries.GetProjectRun(ctx, util.ParseUUID(runID))
+	if err != nil {
+		slog.Error("results reporter: failed to get project run", "run_id", runID, "error", err)
+		return
+	}
+	projectID := util.UUIDToString(run.ProjectID)
 
-	// TODO: Step 2 - Get workflow steps for this run:
-	//   steps, err := s.Queries.ListWorkflowStepsByRun(ctx, util.ParseUUID(runID))
+	// Step 2: Get workflow steps for this run.
+	dbSteps, _ := s.Queries.ListWorkflowStepsByRun(ctx, util.ParseUUID(runID))
+	var steps []stepResult
+	for _, st := range dbSteps {
+		sr := stepResult{
+			Order:       st.StepOrder,
+			Description: st.Description,
+			Status:      st.Status,
+			Error:       st.Error.String,
+			Result:      st.Result,
+		}
+		steps = append(steps, sr)
+	}
 
-	// For now, build a placeholder summary.
-	summary := s.composeSummary(runID, nil)
+	summary := s.composeSummary(runID, steps)
 
 	slog.Info("results reporter: summary composed",
 		"run_id", runID,
+		"project_id", projectID,
 		"summary_length", len(summary),
+		"steps", len(steps),
 	)
 
-	// TODO: Step 3-4 - Post summary to the project's channel:
-	//   project, err := s.Queries.GetProject(ctx, util.ParseUUID(projectID))
-	//   if err == nil && project.ChannelID.Valid {
-	//       s.postSummaryToChannel(ctx, workspaceID, util.UUIDToString(project.ChannelID), summary)
-	//   }
+	// Step 3-4: Post summary to the project's channel.
+	project, projErr := s.Queries.GetProject(ctx, util.ParseUUID(projectID))
+	if projErr == nil && project.ChannelID.Valid {
+		s.postSummaryToChannel(ctx, workspaceID, util.UUIDToString(project.ChannelID), summary)
+	}
 
-	// TODO: Step 5 - Post summary to each source_conversation:
-	//   var sourceConversations []struct{ ConversationID string }
-	//   json.Unmarshal(project.SourceConversations, &sourceConversations)
-	//   for _, sc := range sourceConversations {
-	//       s.postSummaryToChannel(ctx, workspaceID, sc.ConversationID, summary)
-	//   }
+	// Step 6: Notify project participants via inbox.
+	if projErr == nil {
+		s.notifyProjectParticipants(ctx, workspaceID, projectID, runID, summary)
+	}
 
-	// TODO: Step 6 - Create inbox notifications for all project participants:
-	//   s.notifyProjectParticipants(ctx, workspaceID, projectID, runID, summary)
-
-	// TODO: Step 7 - Update project status to "completed":
-	//   s.Queries.UpdateProjectStatus(ctx, db.UpdateProjectStatusParams{
-	//       ID:     util.ParseUUID(projectID),
-	//       Status: "completed",
-	//   })
+	// Step 7: Update project status.
+	runStatus := "completed"
+	for _, st := range steps {
+		if st.Status == "failed" {
+			runStatus = "failed"
+			break
+		}
+	}
+	s.Queries.UpdateProjectStatus(ctx, db.UpdateProjectStatusParams{
+		ID:     util.ParseUUID(projectID),
+		Status: runStatus,
+	})
 
 	// Broadcast a project status change event.
 	s.EventBus.Publish(events.Event{
@@ -148,7 +162,6 @@ func (s *ResultsReporterService) reportRunCompletion(ctx context.Context, worksp
 		},
 	})
 
-	_ = summary
 	_ = ctx
 }
 
@@ -197,20 +210,19 @@ type stepResult struct {
 }
 
 // postSummaryToChannel creates a message record and broadcasts it.
-// nolint: unused // Will be used once project tables exist.
 func (s *ResultsReporterService) postSummaryToChannel(ctx context.Context, workspaceID, channelID, summary string) {
-	// TODO: Create a message record in the database:
-	//   msg, err := s.Queries.CreateMessage(ctx, db.CreateMessageParams{
-	//       WorkspaceID: util.ParseUUID(workspaceID),
-	//       ChannelID:   util.ParseUUID(channelID),
-	//       SenderType:  "system",
-	//       SenderID:    pgtype.UUID{}, // system agent
-	//       Content:     summary,
-	//   })
-	//   if err != nil {
-	//       slog.Error("results reporter: failed to post summary", "channel_id", channelID, "error", err)
-	//       return
-	//   }
+	// Create a message record in the database.
+	_, msgErr := s.Queries.CreateMessage(ctx, db.CreateMessageParams{
+		WorkspaceID: util.ParseUUID(workspaceID),
+		ChannelID:   util.ParseUUID(channelID),
+		SenderType:  "system",
+		SenderID:    pgtype.UUID{},
+		Content:     summary,
+		ContentType: "text",
+	})
+	if msgErr != nil {
+		slog.Error("results reporter: failed to post summary", "channel_id", channelID, "error", msgErr)
+	}
 
 	// Broadcast via WebSocket.
 	data, err := json.Marshal(map[string]any{
@@ -227,36 +239,38 @@ func (s *ResultsReporterService) postSummaryToChannel(ctx context.Context, works
 	}
 
 	s.Hub.BroadcastToWorkspace(workspaceID, data)
-
-	_ = ctx
 }
 
 // notifyProjectParticipants creates inbox items for all participants.
-// nolint: unused // Will be used once project tables exist.
 func (s *ResultsReporterService) notifyProjectParticipants(ctx context.Context, workspaceID, projectID, runID, summary string) {
-	// TODO: Get all project channel members and create inbox items:
-	//   project, err := s.Queries.GetProject(ctx, util.ParseUUID(projectID))
-	//   if err != nil { return }
-	//   members, err := s.Queries.ListChannelMembers(ctx, project.ChannelID)
-	//   for _, m := range members {
-	//       if m.MemberType != "member" { continue }
-	//       s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-	//           WorkspaceID:   util.ParseUUID(workspaceID),
-	//           RecipientType: "member",
-	//           RecipientID:   m.MemberID,
-	//           Type:          "run_completed",
-	//           Title:         "Project run completed",
-	//           Body:          summary,
-	//           Severity:      "info",
-	//           ActionRequired: false,
-	//       })
-	//   }
-
-	_ = ctx
-	_ = workspaceID
-	_ = projectID
-	_ = runID
-	_ = summary
+	// Get project and its channel members, create inbox items.
+	project, projErr := s.Queries.GetProject(ctx, util.ParseUUID(projectID))
+	if projErr != nil {
+		slog.Warn("results reporter: project not found for inbox", "project_id", projectID)
+		return
+	}
+	if !project.ChannelID.Valid {
+		return
+	}
+	members, memErr := s.Queries.ListChannelMembers(ctx, project.ChannelID)
+	if memErr != nil {
+		slog.Warn("results reporter: failed to list channel members", "error", memErr)
+		return
+	}
+	for _, m := range members {
+		if m.MemberType != "member" {
+			continue
+		}
+		s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+			WorkspaceID:   util.ParseUUID(workspaceID),
+			RecipientType: "member",
+			RecipientID:   m.MemberID,
+			Type:          "run_completed",
+			Title:         fmt.Sprintf("Project run completed: %s", runID[:8]),
+			Body:          pgtype.Text{String: summary, Valid: true},
+			Severity:      "info",
+		})
+	}
 
 	slog.Debug("results reporter: inbox notifications created",
 		"project_id", projectID,

@@ -128,10 +128,19 @@ func (s *SchedulerService) ScheduleStep(ctx context.Context, step db.WorkflowSte
 		return
 	}
 
-	// Create agent task queue entry.
-	// TODO: When sqlc types are updated with workflow_step_id and run_id columns,
-	// pass them here. For now, create a standard task and log the association.
-	slog.Info("creating task for workflow step",
+	// Create agent task queue entry linked to the workflow step.
+	_, taskErr := s.Queries.CreateWorkflowStepTask(ctx, db.CreateWorkflowStepTaskParams{
+		AgentID:        selectedAgentID,
+		Priority:       int32(step.StepOrder),
+		WorkflowStepID: pgtype.UUID{Bytes: step.ID.Bytes, Valid: true},
+		RunID:          pgtype.UUID{Bytes: util.ParseUUID(runID).Bytes, Valid: runID != ""},
+	})
+	if taskErr != nil {
+		slog.Error("failed to create task for workflow step", "step_id", stepID, "error", taskErr)
+		s.failStep(ctx, step, fmt.Sprintf("failed to create task: %s", taskErr))
+		return
+	}
+	slog.Info("created task for workflow step",
 		"step_id", stepID,
 		"agent_id", util.UUIDToString(selectedAgentID),
 		"run_id", runID,
@@ -145,8 +154,11 @@ func (s *SchedulerService) ScheduleStep(ctx context.Context, step db.WorkflowSte
 		Error:  pgtype.Text{},
 	})
 
-	// TODO: Set actual_agent_id on the step when the column exists in sqlc types.
-	// s.Queries.UpdateWorkflowStepActualAgent(ctx, ...)
+	// Set actual_agent_id on the step.
+	s.Queries.UpdateWorkflowStepActualAgent(ctx, db.UpdateWorkflowStepActualAgentParams{
+		ID:            step.ID,
+		ActualAgentID: selectedAgentID,
+	})
 
 	// Broadcast step started event.
 	s.broadcastStepEvent(ctx, protocol.EventWorkflowStepStarted, step, map[string]any{
@@ -323,10 +335,9 @@ func (s *SchedulerService) HandleStepFailure(ctx context.Context, stepID string,
 
 	// Parse retry rule from step.
 	retryRule := DefaultRetryRule()
-	// TODO: Parse retry_rule from step JSONB when the column exists.
-	// if step.RetryRule != nil {
-	//     json.Unmarshal(step.RetryRule, &retryRule)
-	// }
+	if len(step.RetryRule) > 2 { // skip empty "{}"
+		json.Unmarshal(step.RetryRule, &retryRule)
+	}
 
 	// Get current retry count.
 	currentRetry := int32(0)
@@ -350,8 +361,8 @@ func (s *SchedulerService) HandleStepFailure(ctx context.Context, stepID string,
 			Error:  pgtype.Text{String: errMsg, Valid: true},
 		})
 
-		// TODO: Increment retry_count on step when column/query exists.
-		// s.Queries.IncrementWorkflowStepRetryCount(ctx, step.ID)
+		// Increment retry count on the step.
+		s.Queries.IncrementWorkflowStepRetry(ctx, step.ID)
 
 		// Schedule retry after delay (with exponential backoff per spec F3).
 		delay := retryRule.RetryDelaySeconds
@@ -421,8 +432,11 @@ func (s *SchedulerService) HandleStepFailure(ctx context.Context, stepID string,
 			Result: nil,
 			Error:  pgtype.Text{},
 		})
-		// TODO: Reset retry_count to 0 and set actual_agent_id when columns exist.
-		// TODO: Log agent_replaced activity.
+		// Set actual_agent_id to the fallback agent.
+		s.Queries.UpdateWorkflowStepActualAgent(ctx, db.UpdateWorkflowStepActualAgentParams{
+			ID:            step.ID,
+			ActualAgentID: fbID,
+		})
 
 		// Re-fetch step and schedule with new agent.
 		freshStep, freshErr := s.Queries.GetWorkflowStep(ctx, step.ID)
@@ -472,10 +486,9 @@ func (s *SchedulerService) HandleStepTimeout(ctx context.Context, stepID string)
 
 	// Parse timeout rule from step.
 	timeoutRule := DefaultTimeoutRule()
-	// TODO: Parse timeout_rule from step JSONB when the column exists.
-	// if step.TimeoutRule != nil {
-	//     json.Unmarshal(step.TimeoutRule, &timeoutRule)
-	// }
+	if len(step.TimeoutRule) > 2 { // skip empty "{}"
+		json.Unmarshal(step.TimeoutRule, &timeoutRule)
+	}
 
 	// Update step status to "timeout".
 	s.Queries.UpdateWorkflowStepStatus(ctx, db.UpdateWorkflowStepStatusParams{
