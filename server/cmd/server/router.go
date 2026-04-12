@@ -56,8 +56,17 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	h.PlanGenerator = service.NewPlanGeneratorService(queries)
 	h.Scheduler = service.NewSchedulerService(queries, hub)
 
+	// Identity generator + scheduler
+	identityGen := service.NewIdentityGeneratorService(queries)
+	identitySched := service.NewIdentitySchedulerService(queries, identityGen)
+	identitySched.Start()
+
 	// Start auto-reply poll daemon
 	go h.AutoReplyService.StartPollDaemon(context.Background())
+
+	// Mediation service (mention SLA enforcement)
+	mediationSvc := service.NewMediationService(queries, h.AutoReplyService, bus)
+	mediationSvc.SubscribeToEvents(bus)
 
 	// Audit + notification services
 	auditSvc := service.NewAuditService(queries)
@@ -327,7 +336,14 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Route("/{planID}", func(r chi.Router) {
 					r.Get("/", h.GetPlan)
 					r.Delete("/", h.DeletePlan)
+					r.Post("/approve", h.ApprovePlan)
 				})
+			})
+
+			// Projects
+			r.Route("/api/projects", func(r chi.Router) {
+				r.Get("/", h.ListProjects)
+				r.Post("/from-chat", h.CreateProjectFromChat)
 			})
 
 			// Workflows

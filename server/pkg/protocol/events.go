@@ -71,4 +71,8 @@ const (
 
 	// Plan events
 	EventPlanGenerated = "plan:generated"
+	EventPlanApproved  = "plan:approved"
+
+	// Message events
+	EventMessageCreated = "message:created"
 )

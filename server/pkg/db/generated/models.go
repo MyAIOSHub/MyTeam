@@ -50,6 +50,8 @@ type Agent struct {
 	TriggerOnChannelMention pgtype.Bool        `json:"trigger_on_channel_mention"`
 	IsSystem                bool               `json:"is_system"`
 	SystemConfig            []byte             `json:"system_config"`
+	NeedsAttention          bool               `json:"needs_attention"`
+	NeedsAttentionReason    pgtype.Text        `json:"needs_attention_reason"`
 }
 
 type AgentRuntime struct {
@@ -301,6 +303,29 @@ type PersonalAccessToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type Project struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Title       string             `json:"title"`
+	Description pgtype.Text        `json:"description"`
+	Status      string             `json:"status"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	PlanID      pgtype.UUID        `json:"plan_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ProjectVersion struct {
+	ID           pgtype.UUID        `json:"id"`
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	Version      int32              `json:"version"`
+	Title        string             `json:"title"`
+	Description  pgtype.Text        `json:"description"`
+	PlanSnapshot []byte             `json:"plan_snapshot"`
+	CreatedBy    pgtype.UUID        `json:"created_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
 type Plan struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -314,6 +339,10 @@ type Plan struct {
 	CreatedBy      pgtype.UUID        `json:"created_by"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ApprovalStatus string             `json:"approval_status"`
+	ApprovedBy     pgtype.UUID        `json:"approved_by"`
+	ApprovedAt     pgtype.Timestamptz `json:"approved_at"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
 }
 
 type RemoteSession struct {

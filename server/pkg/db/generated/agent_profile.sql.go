@@ -11,10 +11,82 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const setAgentNeedsAttention = `-- name: SetAgentNeedsAttention :exec
+UPDATE agent SET needs_attention = $2, needs_attention_reason = $3 WHERE id = $1
+`
+
+type SetAgentNeedsAttentionParams struct {
+	ID                   pgtype.UUID `json:"id"`
+	NeedsAttention       bool        `json:"needs_attention"`
+	NeedsAttentionReason pgtype.Text `json:"needs_attention_reason"`
+}
+
+func (q *Queries) SetAgentNeedsAttention(ctx context.Context, arg SetAgentNeedsAttentionParams) error {
+	_, err := q.db.Exec(ctx, setAgentNeedsAttention, arg.ID, arg.NeedsAttention, arg.NeedsAttentionReason)
+	return err
+}
+
+const listAllAgentsGlobal = `-- name: ListAllAgentsGlobal :many
+SELECT * FROM agent WHERE archived_at IS NULL ORDER BY created_at ASC
+`
+
+func (q *Queries) ListAllAgentsGlobal(ctx context.Context) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listAllAgentsGlobal)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.Tools,
+			&i.Triggers,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.Capabilities,
+			&i.AutoReplyEnabled,
+			&i.AutoReplyConfig,
+			&i.DisplayName,
+			&i.Avatar,
+			&i.Bio,
+			&i.Tags,
+			&i.AgentMetadata,
+			&i.TriggerOnChannelMention,
+			&i.IsSystem,
+			&i.SystemConfig,
+			&i.NeedsAttention,
+			&i.NeedsAttentionReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createSystemAgent = `-- name: CreateSystemAgent :one
 INSERT INTO agent (workspace_id, name, description, status, is_system, owner_id, visibility)
 VALUES ($1, 'System Agent', 'Workspace system agent - manages defaults and automation', 'idle', TRUE, $2, 'workspace')
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, tools, triggers, runtime_id, instructions, archived_at, archived_by, capabilities, auto_reply_enabled, auto_reply_config, display_name, avatar, bio, tags, agent_metadata, trigger_on_channel_mention, is_system, system_config
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, tools, triggers, runtime_id, instructions, archived_at, archived_by, capabilities, auto_reply_enabled, auto_reply_config, display_name, avatar, bio, tags, agent_metadata, trigger_on_channel_mention, is_system, system_config, needs_attention, needs_attention_reason
 `
 
 type CreateSystemAgentParams struct {
@@ -56,6 +128,8 @@ func (q *Queries) CreateSystemAgent(ctx context.Context, arg CreateSystemAgentPa
 		&i.TriggerOnChannelMention,
 		&i.IsSystem,
 		&i.SystemConfig,
+		&i.NeedsAttention,
+		&i.NeedsAttentionReason,
 	)
 	return i, err
 }
@@ -103,6 +177,8 @@ func (q *Queries) GetAgentByName(ctx context.Context, arg GetAgentByNameParams) 
 		&i.TriggerOnChannelMention,
 		&i.IsSystem,
 		&i.SystemConfig,
+		&i.NeedsAttention,
+		&i.NeedsAttentionReason,
 	)
 	return i, err
 }
@@ -221,6 +297,8 @@ func (q *Queries) GetSystemAgent(ctx context.Context, workspaceID pgtype.UUID) (
 		&i.TriggerOnChannelMention,
 		&i.IsSystem,
 		&i.SystemConfig,
+		&i.NeedsAttention,
+		&i.NeedsAttentionReason,
 	)
 	return i, err
 }
@@ -277,6 +355,8 @@ func (q *Queries) ListAgentsWithCapability(ctx context.Context, arg ListAgentsWi
 			&i.TriggerOnChannelMention,
 			&i.IsSystem,
 			&i.SystemConfig,
+			&i.NeedsAttention,
+			&i.NeedsAttentionReason,
 		); err != nil {
 			return nil, err
 		}
