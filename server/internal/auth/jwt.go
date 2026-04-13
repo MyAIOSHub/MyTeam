@@ -46,6 +46,14 @@ func GenerateDaemonToken() (string, error) {
 	return "mdt_" + hex.EncodeToString(b), nil
 }
 
+// PersonalAccessTokenPrefix is the prefix for all personal access tokens.
+const PersonalAccessTokenPrefix = "mul_"
+
+// IsPATToken checks whether a token string has the personal access token prefix.
+func IsPATToken(token string) bool {
+	return len(token) > len(PersonalAccessTokenPrefix) && token[:len(PersonalAccessTokenPrefix)] == PersonalAccessTokenPrefix
+}
+
 // HashToken returns the hex-encoded SHA-256 hash of a token string.
 func HashToken(token string) string {
 	h := sha256.Sum256([]byte(token))

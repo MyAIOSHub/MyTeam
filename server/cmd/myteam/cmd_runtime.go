@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dy9759/MyTeam/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 var runtimeCmd = &cobra.Command{

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // ---------------------------------------------------------------------------
@@ -28,6 +29,32 @@ type FileIndexResponse struct {
 	ChannelID            *string `json:"channel_id,omitempty"`
 	ProjectID            *string `json:"project_id,omitempty"`
 	CreatedAt            string  `json:"created_at"`
+}
+
+func fileIndexToResponse(f db.FileIndex) FileIndexResponse {
+	resp := FileIndexResponse{
+		ID:                   uuidToString(f.ID),
+		WorkspaceID:          uuidToString(f.WorkspaceID),
+		UploaderIdentityID:   uuidToString(f.UploaderIdentityID),
+		UploaderIdentityType: f.UploaderIdentityType,
+		OwnerID:              uuidToString(f.OwnerID),
+		SourceType:           f.SourceType,
+		SourceID:             uuidToString(f.SourceID),
+		FileName:             f.FileName,
+		FileSize:             f.FileSize.Int64,
+		ContentType:          f.ContentType.String,
+		StoragePath:          f.StoragePath.String,
+		CreatedAt:            f.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
+	}
+	if f.ChannelID.Valid {
+		s := uuidToString(f.ChannelID)
+		resp.ChannelID = &s
+	}
+	if f.ProjectID.Valid {
+		s := uuidToString(f.ProjectID)
+		resp.ProjectID = &s
+	}
+	return resp
 }
 
 // ---------------------------------------------------------------------------

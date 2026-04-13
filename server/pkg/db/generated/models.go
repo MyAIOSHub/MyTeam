@@ -8,6 +8,56 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type BrowserContext struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Domain      pgtype.Text        `json:"domain"`
+	Status      string             `json:"status"`
+	CreatedBy   string             `json:"created_by"`
+	SharedWith  []byte             `json:"shared_with"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
+}
+
+type BrowserTab struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Url            string             `json:"url"`
+	Title          pgtype.Text        `json:"title"`
+	Status         string             `json:"status"`
+	CreatedBy      string             `json:"created_by"`
+	SharedWith     []byte             `json:"shared_with"`
+	ContextID      pgtype.UUID        `json:"context_id"`
+	SessionID      pgtype.Text        `json:"session_id"`
+	LiveUrl        pgtype.Text        `json:"live_url"`
+	ScreenshotUrl  pgtype.Text        `json:"screenshot_url"`
+	ConversationID pgtype.UUID        `json:"conversation_id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	LastActiveAt   pgtype.Timestamptz `json:"last_active_at"`
+}
+
+type BrowserUsage struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	TabID           pgtype.UUID        `json:"tab_id"`
+	SessionID       pgtype.Text        `json:"session_id"`
+	OpenedBy        string             `json:"opened_by"`
+	StartedAt       pgtype.Timestamptz `json:"started_at"`
+	EndedAt         pgtype.Timestamptz `json:"ended_at"`
+	DurationSeconds pgtype.Int4        `json:"duration_seconds"`
+}
+
+type WorkspaceCollaborator struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Email       string             `json:"email"`
+	Role        string             `json:"role"`
+	AddedBy     pgtype.Text        `json:"added_by"`
+	AddedAt     pgtype.Timestamptz `json:"added_at"`
+}
+
 type ActivityLog struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -64,18 +114,23 @@ type Agent struct {
 }
 
 type AgentRuntime struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	DaemonID    pgtype.Text        `json:"daemon_id"`
-	Name        string             `json:"name"`
-	RuntimeMode string             `json:"runtime_mode"`
-	Provider    string             `json:"provider"`
-	Status      string             `json:"status"`
-	DeviceInfo  string             `json:"device_info"`
-	Metadata    []byte             `json:"metadata"`
-	LastSeenAt  pgtype.Timestamptz `json:"last_seen_at"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	DaemonID      pgtype.Text        `json:"daemon_id"`
+	Name          string             `json:"name"`
+	RuntimeMode   string             `json:"runtime_mode"`
+	Provider      string             `json:"provider"`
+	Status        string             `json:"status"`
+	DeviceInfo    string             `json:"device_info"`
+	Metadata      []byte             `json:"metadata"`
+	LastSeenAt    pgtype.Timestamptz `json:"last_seen_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ServerHost    string             `json:"server_host"`
+	WorkingDir    string             `json:"working_dir"`
+	Capabilities  []byte             `json:"capabilities"`
+	LastHeartbeat pgtype.Timestamptz `json:"last_heartbeat"`
+	Readiness     string             `json:"readiness"`
 }
 
 type AgentSkill struct {

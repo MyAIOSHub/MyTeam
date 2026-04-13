@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"strings"
 
-	db "github.com/dy9759/MyTeam/server/pkg/db/generated"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"

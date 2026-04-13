@@ -496,56 +496,7 @@ func (h *Handler) GetProjectRuns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"runs": []ProjectRunResponse{}, "total": 0})
 }
 
-// ApprovePlan handles POST /api/projects/{projectID}/approve
-// Changes plan approval_status from 'draft'/'pending_approval' to 'approved'.
-func (h *Handler) ApprovePlan(w http.ResponseWriter, r *http.Request) {
-	projectID := chi.URLParam(r, "projectID")
-	if projectID == "" {
-		writeError(w, http.StatusBadRequest, "projectID is required")
-		return
-	}
-
-	userID, ok := requireUserID(w, r)
-	if !ok {
-		return
-	}
-	workspaceID := resolveWorkspaceID(r)
-
-	// Only Owner can approve
-	member, ok := h.workspaceMember(w, r, workspaceID)
-	if !ok {
-		return
-	}
-	if member.Role != "owner" {
-		writeError(w, http.StatusForbidden, "only workspace owners can approve plans")
-		return
-	}
-
-	// TODO: Implement once sqlc queries are generated.
-	// 1. Get the plan associated with this project
-	// 2. Verify approval_status is 'draft' or 'pending_approval'
-	// 3. Update to 'approved', set approved_by and approved_at
-	//
-	// plan, err := h.Queries.GetPlanByProjectID(r.Context(), parseUUID(projectID))
-	// if plan.ApprovalStatus != "draft" && plan.ApprovalStatus != "pending_approval" {
-	//     writeError(w, http.StatusBadRequest, "plan is not in a state that can be approved")
-	//     return
-	// }
-	// err = h.Queries.ApprovePlan(r.Context(), db.ApprovePlanParams{
-	//     ID:         plan.ID,
-	//     ApprovedBy: parseUUID(userID),
-	// })
-
-	_ = projectID
-
-	h.publish(protocol.EventPlanApproved, workspaceID, "member", userID, map[string]string{
-		"project_id": projectID,
-	})
-
-	slog.Info("plan approved", "project_id", projectID, "approved_by", userID)
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "approved"})
-}
+// ApprovePlan is now in plan.go — moved there with actual DB implementation.
 
 // RejectPlan handles POST /api/projects/{projectID}/reject
 // Changes plan approval_status to 'rejected'.
