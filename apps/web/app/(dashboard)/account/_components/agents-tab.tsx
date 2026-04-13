@@ -195,7 +195,7 @@ export function AgentsTab({
                         Runtime Capabilities
                       </div>
                       <div className="mt-1 text-sm font-medium text-foreground">
-                        {selectedRuntime?.capabilities.length
+                        {selectedRuntime?.capabilities?.length
                           ? selectedRuntime.capabilities.slice(0, 3).join(" · ")
                           : "—"}
                       </div>

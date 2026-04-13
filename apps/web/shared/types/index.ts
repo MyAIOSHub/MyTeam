@@ -68,3 +68,10 @@ export type {
 } from "./project";
 export type { FileIndex, FileSnapshot, WorkspaceMetrics } from "./file";
 export type { SearchResult, SearchResponse } from "./search";
+export type {
+  WorkspaceSnapshot,
+  WorkspaceCollaborator,
+  WorkspaceAuditEntry,
+  BrowserTab,
+  BrowserContext,
+} from "./workspace-substrate";

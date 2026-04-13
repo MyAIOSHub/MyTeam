@@ -42,6 +42,18 @@ export interface BrowserTab {
   last_active_at: string;
 }
 
+export interface WorkspaceAuditEntry {
+  id: string;
+  workspace_id: string;
+  action: string;
+  actor_type: string;
+  actor_id: string | null;
+  resource_type?: string;
+  resource_id?: string;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface WorkspaceSnapshot {
   workspace: Workspace;
   agents: Agent[];

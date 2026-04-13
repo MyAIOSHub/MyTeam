@@ -7,6 +7,7 @@ export type AgentOnlineStatus = "online" | "offline";
 export type AgentWorkloadStatus = "idle" | "busy" | "blocked" | "degraded" | "suspended";
 
 export interface IdentityCard {
+  title?: string;
   capabilities: string[];
   tools: string[];
   skills: string[];
@@ -14,6 +15,9 @@ export interface IdentityCard {
   completed_projects: { project_id: string; title: string; completed_at: string }[];
   description_auto: string;
   description_manual: string;
+  needs_attention?: boolean;
+  pinned_fields?: string[];
+  visibility?: string;
 }
 
 export type AgentRuntimeMode = "local" | "cloud";
@@ -35,6 +39,11 @@ export interface RuntimeDevice {
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
+  server_host?: string;
+  working_dir?: string;
+  capabilities?: string[];
+  readiness?: string;
+  last_heartbeat?: string;
 }
 
 export type AgentRuntime = RuntimeDevice;

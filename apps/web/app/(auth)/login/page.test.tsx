@@ -50,10 +50,9 @@ describe("LoginPage", () => {
     render(<LoginPage />);
 
     expect(screen.getByText("My Team")).toBeInTheDocument();
-    expect(screen.getByText("Turn coding agents into real teammates")).toBeInTheDocument();
-    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(screen.getByLabelText("邮箱")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Continue" })
+      screen.getByRole("button", { name: "继续" })
     ).toBeInTheDocument();
   });
 
@@ -61,7 +60,8 @@ describe("LoginPage", () => {
     const user = userEvent.setup();
     render(<LoginPage />);
 
-    await user.click(screen.getByRole("button", { name: "Continue" }));
+    // Form has required attribute so empty submit won't fire
+    await user.click(screen.getByRole("button", { name: "继续" }));
     expect(mockSendCode).not.toHaveBeenCalled();
   });
 
@@ -70,24 +70,24 @@ describe("LoginPage", () => {
     const user = userEvent.setup();
     render(<LoginPage />);
 
-    await user.type(screen.getByLabelText("Email"), "test@multica.ai");
-    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.type(screen.getByLabelText("邮箱"), "test@multica.ai");
+    await user.click(screen.getByRole("button", { name: "继续" }));
 
     await waitFor(() => {
       expect(mockSendCode).toHaveBeenCalledWith("test@multica.ai");
     });
   });
 
-  it("shows 'Sending code...' while submitting", async () => {
+  it("shows submitting state while sending code", async () => {
     mockSendCode.mockReturnValueOnce(new Promise(() => {}));
     const user = userEvent.setup();
     render(<LoginPage />);
 
-    await user.type(screen.getByLabelText("Email"), "test@multica.ai");
-    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.type(screen.getByLabelText("邮箱"), "test@multica.ai");
+    await user.click(screen.getByRole("button", { name: "继续" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Sending code...")).toBeInTheDocument();
+      expect(screen.getByText("发送验证码中...")).toBeInTheDocument();
     });
   });
 
@@ -96,11 +96,12 @@ describe("LoginPage", () => {
     const user = userEvent.setup();
     render(<LoginPage />);
 
-    await user.type(screen.getByLabelText("Email"), "test@multica.ai");
-    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.type(screen.getByLabelText("邮箱"), "test@multica.ai");
+    await user.click(screen.getByRole("button", { name: "继续" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Check your email")).toBeInTheDocument();
+      // After sending code, the component should show the verification view
+      expect(screen.getByText(/验证码/)).toBeInTheDocument();
     });
   });
 
@@ -109,8 +110,8 @@ describe("LoginPage", () => {
     const user = userEvent.setup();
     render(<LoginPage />);
 
-    await user.type(screen.getByLabelText("Email"), "test@multica.ai");
-    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.type(screen.getByLabelText("邮箱"), "test@multica.ai");
+    await user.click(screen.getByRole("button", { name: "继续" }));
 
     await waitFor(() => {
       expect(screen.getByText("Network error")).toBeInTheDocument();

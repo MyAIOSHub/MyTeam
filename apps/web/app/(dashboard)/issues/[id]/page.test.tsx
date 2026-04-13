@@ -332,24 +332,24 @@ describe("IssueDetailPage", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByPlaceholderText("Leave a comment..."),
+        screen.getByPlaceholderText("留下评论..."),
       ).toBeInTheDocument();
     });
 
-    const commentInput = screen.getByPlaceholderText("Leave a comment...");
+    const commentInput = screen.getByPlaceholderText("留下评论...");
 
     // Use fireEvent to update the textarea value and trigger onUpdate
     await act(async () => {
       fireEvent.change(commentInput, { target: { value: "New test comment" } });
     });
 
-    // Find the submit button associated with the "Leave a comment..." input.
+    // Find the submit button associated with the "留下评论..." input.
     // Multiple ArrowUp buttons exist (one per ReplyInput), so we find the
     // button within the same ReplyInput container as our textarea.
     const allArrowUpBtns = screen.getAllByRole("button").filter(
       (btn) => btn.querySelector(".lucide-arrow-up") !== null,
     );
-    // The bottom "Leave a comment..." ReplyInput renders last, so its button is last
+    // The bottom "留下评论..." ReplyInput renders last, so its button is last
     const submitBtn = allArrowUpBtns[allArrowUpBtns.length - 1]!;
     await waitFor(() => {
       expect(submitBtn).not.toBeDisabled();
