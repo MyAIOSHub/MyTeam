@@ -96,21 +96,18 @@ describe("WSClient", () => {
       getWorkspaceId: () => "w",
     });
     client.connect();
-    // delays: 1000, 2000, 4000, 8000, 16000, 30000, 30000...
+    // delays: 1000, 2000, 4000, 8000, 16000, 30000, 30000 (cap holds)
     const expectedDelays = [1000, 2000, 4000, 8000, 16000, 30000, 30000];
-    for (const delay of expectedDelays) {
+    for (let i = 0; i < expectedDelays.length; i++) {
+      const delay = expectedDelays[i]!;
       const socket =
-        FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+        FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
       socket.simulateOpen();
       socket.close();
       vi.advanceTimersByTime(delay - 1);
-      expect(FakeWebSocket.instances.length).toBe(
-        expectedDelays.indexOf(delay) + 1,
-      );
+      expect(FakeWebSocket.instances.length).toBe(i + 1);
       vi.advanceTimersByTime(1);
-      expect(FakeWebSocket.instances.length).toBe(
-        expectedDelays.indexOf(delay) + 2,
-      );
+      expect(FakeWebSocket.instances.length).toBe(i + 2);
     }
   });
 
