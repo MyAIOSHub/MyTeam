@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Channel, Conversation } from "@myteam/client-core";
+import type { Channel, Conversation, Message } from "@myteam/client-core";
 import { RouteShell } from "@/components/route-shell";
 import { useDesktopWorkspaceStore } from "@/lib/desktop-client";
 import {
+  FileList,
   MessageInput,
   MessageList,
   NewChannelDialog,
   NewDMDialog,
+  ThreadPanel,
   TypingIndicator,
   useDesktopMessagingStore,
   type DMCandidate,
@@ -36,6 +38,8 @@ export function SessionRoute() {
   const [showNewDM, setShowNewDM] = useState(false);
   const [showNewChannel, setShowNewChannel] = useState(false);
   const [typingAgent, setTypingAgent] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"messages" | "files">("messages");
+  const [threadMessage, setThreadMessage] = useState<Message | null>(null);
 
   const mentionCandidates = useMemo(() => {
     const personalAgents = agents.filter(
@@ -70,6 +74,11 @@ export function SessionRoute() {
       void loadMessages({ recipient_id: selection.conversation.peer_id });
     }
   }, [selection, loadMessages]);
+
+  useEffect(() => {
+    setViewMode("messages");
+    setThreadMessage(null);
+  }, [selection]);
 
   const resolveName = (senderId: string, senderType: "member" | "agent") => {
     if (senderType === "agent") {
@@ -116,7 +125,7 @@ export function SessionRoute() {
       title="Collaborate with agents and teammates"
       description="Send messages, mention agents, and watch replies stream in real time."
     >
-      <div className="grid min-h-[70vh] gap-4 xl:grid-cols-[260px_1fr]">
+      <div className={`grid min-h-[70vh] gap-4 ${threadMessage ? "xl:grid-cols-[260px_1fr_320px]" : "xl:grid-cols-[260px_1fr]"}`}>
         <section className="flex flex-col rounded-[28px] border border-border/70 bg-card/85 p-4">
           <div className="flex gap-2">
             <button
@@ -180,10 +189,41 @@ export function SessionRoute() {
                 跨 owner 对话对双方 owner 可见
               </p>
             )}
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setViewMode("messages")}
+                className={`rounded-xl px-3 py-1 text-xs font-medium ${
+                  viewMode === "messages" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-white/5"
+                }`}
+              >
+                Messages
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("files")}
+                className={`rounded-xl px-3 py-1 text-xs font-medium ${
+                  viewMode === "files" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-white/5"
+                }`}
+              >
+                Files
+              </button>
+            </div>
           </div>
           <div className="flex-1 overflow-hidden py-4">
             {selection ? (
-              <MessageList messages={currentMessages} resolveName={resolveName} />
+              viewMode === "files" ? (
+                <FileList
+                  channelId={selection.kind === "channel" ? selection.channel.id : undefined}
+                  recipientId={selection.kind === "dm" ? selection.conversation.peer_id : undefined}
+                />
+              ) : (
+                <MessageList
+                  messages={currentMessages}
+                  resolveName={resolveName}
+                  onOpenThread={(msg) => setThreadMessage(msg)}
+                />
+              )
             ) : (
               <EmptyPane message="Pick a channel or DM on the left, or start a new one." />
             )}
@@ -198,6 +238,15 @@ export function SessionRoute() {
             />
           ) : null}
         </section>
+
+        {threadMessage && (
+          <ThreadPanel
+            parentMessage={threadMessage}
+            candidates={mentionCandidates}
+            resolveName={resolveName}
+            onClose={() => setThreadMessage(null)}
+          />
+        )}
       </div>
 
       {showNewDM ? (

@@ -4,6 +4,7 @@ import type { Message } from "@myteam/client-core";
 interface Props {
   messages: Message[];
   resolveName: (senderId: string, senderType: "member" | "agent") => string;
+  onOpenThread?: (message: Message) => void;
 }
 
 function formatTime(iso: string): string {
@@ -11,7 +12,7 @@ function formatTime(iso: string): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export function MessageList({ messages, resolveName }: Props) {
+export function MessageList({ messages, resolveName, onOpenThread }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -49,6 +50,15 @@ export function MessageList({ messages, resolveName }: Props) {
           <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">
             {msg.content}
           </p>
+          {onOpenThread && (
+            <button
+              type="button"
+              onClick={() => onOpenThread(msg)}
+              className="mt-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Reply in thread
+            </button>
+          )}
         </article>
       ))}
       <div ref={bottomRef} />

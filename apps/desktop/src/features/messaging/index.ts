@@ -5,3 +5,5 @@ export { MentionPicker, type MentionCandidate } from "./components/mention-picke
 export { NewDMDialog, type DMCandidate } from "./components/new-dm-dialog";
 export { NewChannelDialog } from "./components/new-channel-dialog";
 export { TypingIndicator } from "./components/typing-indicator";
+export { FileList } from "./components/file-list";
+export { ThreadPanel } from "./components/thread-panel";
