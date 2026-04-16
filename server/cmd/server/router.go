@@ -95,7 +95,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	resultsReporter.Start()
 
 	// Mediation service — drives the Session page system agent.
-	mediationSvc := service.NewMediationService(queries, hub, bus, h.AutoReplyService)
+	mediationSvc := service.NewMediationService(queries, hub, bus, h.AutoReplyService, pool)
 	mediationSvc.Start()
 
 	r := chi.NewRouter()
