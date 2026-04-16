@@ -449,6 +449,31 @@ type Project struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ProjectBranch struct {
+	ID             pgtype.UUID        `json:"id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	Name           string             `json:"name"`
+	ParentBranchID pgtype.UUID        `json:"parent_branch_id"`
+	IsDefault      bool               `json:"is_default"`
+	Status         string             `json:"status"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type ProjectResult struct {
+	ID               pgtype.UUID        `json:"id"`
+	RunID            pgtype.UUID        `json:"run_id"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	VersionID        pgtype.UUID        `json:"version_id"`
+	Summary          pgtype.Text        `json:"summary"`
+	Artifacts        []byte             `json:"artifacts"`
+	Deliverables     []byte             `json:"deliverables"`
+	AcceptanceStatus string             `json:"acceptance_status"`
+	AcceptedBy       pgtype.UUID        `json:"accepted_by"`
+	AcceptedAt       pgtype.Timestamptz `json:"accepted_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type ProjectRun struct {
 	ID            pgtype.UUID        `json:"id"`
 	PlanID        pgtype.UUID        `json:"plan_id"`
@@ -476,6 +501,7 @@ type ProjectVersion struct {
 	VersionStatus    string             `json:"version_status"`
 	CreatedBy        pgtype.UUID        `json:"created_by"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	BranchID         pgtype.UUID        `json:"branch_id"`
 }
 
 type RemoteSession struct {

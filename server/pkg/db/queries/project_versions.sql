@@ -11,3 +11,6 @@ SELECT * FROM project_version WHERE id = @id;
 
 -- name: GetLatestProjectVersion :one
 SELECT * FROM project_version WHERE project_id = @project_id ORDER BY version_number DESC LIMIT 1;
+
+-- name: ListProjectVersionsByBranch :many
+SELECT * FROM project_version WHERE project_id = @project_id AND branch_id = @branch_id ORDER BY version_number DESC;
