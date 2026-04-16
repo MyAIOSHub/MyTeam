@@ -28,3 +28,27 @@ DELETE FROM project WHERE id = @id;
 
 -- name: UpdateProjectChannel :exec
 UPDATE project SET channel_id = @channel_id, updated_at = NOW() WHERE id = @id;
+
+-- name: ListScheduledProjects :many
+SELECT * FROM project
+WHERE status = 'scheduled'
+  AND schedule_type IN ('scheduled_once', 'recurring')
+ORDER BY created_at ASC;
+
+-- name: ListRunningRecurringProjects :many
+SELECT * FROM project
+WHERE status = 'running'
+  AND schedule_type = 'recurring'
+ORDER BY created_at ASC;
+
+-- name: CountProjectRuns :one
+SELECT COUNT(*) FROM project_run WHERE project_id = @project_id;
+
+-- name: CountConsecutiveFailedRuns :one
+SELECT COUNT(*) FROM (
+  SELECT status FROM project_run
+  WHERE project_id = @project_id
+  ORDER BY created_at DESC
+  LIMIT $2
+) sub
+WHERE sub.status = 'failed';

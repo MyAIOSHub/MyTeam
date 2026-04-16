@@ -435,18 +435,24 @@ type Plan struct {
 }
 
 type Project struct {
-	ID                  pgtype.UUID        `json:"id"`
-	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
-	Title               string             `json:"title"`
-	Description         pgtype.Text        `json:"description"`
-	Status              string             `json:"status"`
-	ScheduleType        string             `json:"schedule_type"`
-	CronExpr            pgtype.Text        `json:"cron_expr"`
-	SourceConversations []byte             `json:"source_conversations"`
-	ChannelID           pgtype.UUID        `json:"channel_id"`
-	CreatorOwnerID      pgtype.UUID        `json:"creator_owner_id"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	ID                           pgtype.UUID        `json:"id"`
+	WorkspaceID                  pgtype.UUID        `json:"workspace_id"`
+	Title                        string             `json:"title"`
+	Description                  pgtype.Text        `json:"description"`
+	Status                       string             `json:"status"`
+	ScheduleType                 string             `json:"schedule_type"`
+	CronExpr                     pgtype.Text        `json:"cron_expr"`
+	SourceConversations          []byte             `json:"source_conversations"`
+	ChannelID                    pgtype.UUID        `json:"channel_id"`
+	CreatorOwnerID               pgtype.UUID        `json:"creator_owner_id"`
+	CreatedAt                    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                    pgtype.Timestamptz `json:"updated_at"`
+	DefaultBranchID              pgtype.UUID        `json:"default_branch_id"`
+	MaxRuns                      pgtype.Int4        `json:"max_runs"`
+	EndTime                      pgtype.Timestamptz `json:"end_time"`
+	ConsecutiveFailureThreshold  pgtype.Int4        `json:"consecutive_failure_threshold"`
+	ScheduledAt                  pgtype.Timestamptz `json:"scheduled_at"`
+	PlanVisibility               string             `json:"plan_visibility"`
 }
 
 type ProjectBranch struct {

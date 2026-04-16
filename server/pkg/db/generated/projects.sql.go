@@ -14,7 +14,7 @@ import (
 const createProject = `-- name: CreateProject :one
 INSERT INTO project (workspace_id, title, description, status, schedule_type, cron_expr, source_conversations, channel_id, creator_owner_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, workspace_id, title, description, status, schedule_type, cron_expr, source_conversations, channel_id, creator_owner_id, created_at, updated_at
+RETURNING id, workspace_id, title, description, status, schedule_type, cron_expr, source_conversations, channel_id, creator_owner_id, created_at, updated_at, default_branch_id, max_runs, end_time, consecutive_failure_threshold, scheduled_at, plan_visibility
 `
 
 type CreateProjectParams struct {
@@ -55,6 +55,12 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.CreatorOwnerID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DefaultBranchID,
+		&i.MaxRuns,
+		&i.EndTime,
+		&i.ConsecutiveFailureThreshold,
+		&i.ScheduledAt,
+		&i.PlanVisibility,
 	)
 	return i, err
 }
@@ -69,7 +75,7 @@ func (q *Queries) DeleteProject(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, workspace_id, title, description, status, schedule_type, cron_expr, source_conversations, channel_id, creator_owner_id, created_at, updated_at FROM project WHERE id = $1
+SELECT id, workspace_id, title, description, status, schedule_type, cron_expr, source_conversations, channel_id, creator_owner_id, created_at, updated_at, default_branch_id, max_runs, end_time, consecutive_failure_threshold, scheduled_at, plan_visibility FROM project WHERE id = $1
 `
 
 func (q *Queries) GetProject(ctx context.Context, id pgtype.UUID) (Project, error) {
@@ -88,12 +94,18 @@ func (q *Queries) GetProject(ctx context.Context, id pgtype.UUID) (Project, erro
 		&i.CreatorOwnerID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DefaultBranchID,
+		&i.MaxRuns,
+		&i.EndTime,
+		&i.ConsecutiveFailureThreshold,
+		&i.ScheduledAt,
+		&i.PlanVisibility,
 	)
 	return i, err
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, status, schedule_type, cron_expr, source_conversations, channel_id, creator_owner_id, created_at, updated_at FROM project WHERE workspace_id = $1 ORDER BY created_at DESC
+SELECT id, workspace_id, title, description, status, schedule_type, cron_expr, source_conversations, channel_id, creator_owner_id, created_at, updated_at, default_branch_id, max_runs, end_time, consecutive_failure_threshold, scheduled_at, plan_visibility FROM project WHERE workspace_id = $1 ORDER BY created_at DESC
 `
 
 func (q *Queries) ListProjects(ctx context.Context, workspaceID pgtype.UUID) ([]Project, error) {
@@ -118,6 +130,12 @@ func (q *Queries) ListProjects(ctx context.Context, workspaceID pgtype.UUID) ([]
 			&i.CreatorOwnerID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DefaultBranchID,
+			&i.MaxRuns,
+			&i.EndTime,
+			&i.ConsecutiveFailureThreshold,
+			&i.ScheduledAt,
+			&i.PlanVisibility,
 		); err != nil {
 			return nil, err
 		}
@@ -138,7 +156,7 @@ UPDATE project SET
     cron_expr = $5,
     updated_at = NOW()
 WHERE id = $6
-RETURNING id, workspace_id, title, description, status, schedule_type, cron_expr, source_conversations, channel_id, creator_owner_id, created_at, updated_at
+RETURNING id, workspace_id, title, description, status, schedule_type, cron_expr, source_conversations, channel_id, creator_owner_id, created_at, updated_at, default_branch_id, max_runs, end_time, consecutive_failure_threshold, scheduled_at, plan_visibility
 `
 
 type UpdateProjectParams struct {
@@ -173,6 +191,12 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.CreatorOwnerID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DefaultBranchID,
+		&i.MaxRuns,
+		&i.EndTime,
+		&i.ConsecutiveFailureThreshold,
+		&i.ScheduledAt,
+		&i.PlanVisibility,
 	)
 	return i, err
 }
@@ -203,4 +227,129 @@ type UpdateProjectStatusParams struct {
 func (q *Queries) UpdateProjectStatus(ctx context.Context, arg UpdateProjectStatusParams) error {
 	_, err := q.db.Exec(ctx, updateProjectStatus, arg.Status, arg.ID)
 	return err
+}
+
+const listScheduledProjects = `-- name: ListScheduledProjects :many
+SELECT id, workspace_id, title, description, status, schedule_type, cron_expr, source_conversations, channel_id, creator_owner_id, created_at, updated_at, default_branch_id, max_runs, end_time, consecutive_failure_threshold, scheduled_at, plan_visibility FROM project
+WHERE status = 'scheduled'
+  AND schedule_type IN ('scheduled_once', 'recurring')
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListScheduledProjects(ctx context.Context) ([]Project, error) {
+	rows, err := q.db.Query(ctx, listScheduledProjects)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Project{}
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.ScheduleType,
+			&i.CronExpr,
+			&i.SourceConversations,
+			&i.ChannelID,
+			&i.CreatorOwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DefaultBranchID,
+			&i.MaxRuns,
+			&i.EndTime,
+			&i.ConsecutiveFailureThreshold,
+			&i.ScheduledAt,
+			&i.PlanVisibility,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRunningRecurringProjects = `-- name: ListRunningRecurringProjects :many
+SELECT id, workspace_id, title, description, status, schedule_type, cron_expr, source_conversations, channel_id, creator_owner_id, created_at, updated_at, default_branch_id, max_runs, end_time, consecutive_failure_threshold, scheduled_at, plan_visibility FROM project
+WHERE status = 'running'
+  AND schedule_type = 'recurring'
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListRunningRecurringProjects(ctx context.Context) ([]Project, error) {
+	rows, err := q.db.Query(ctx, listRunningRecurringProjects)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Project{}
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.ScheduleType,
+			&i.CronExpr,
+			&i.SourceConversations,
+			&i.ChannelID,
+			&i.CreatorOwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DefaultBranchID,
+			&i.MaxRuns,
+			&i.EndTime,
+			&i.ConsecutiveFailureThreshold,
+			&i.ScheduledAt,
+			&i.PlanVisibility,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countProjectRuns = `-- name: CountProjectRuns :one
+SELECT COUNT(*) FROM project_run WHERE project_id = $1
+`
+
+func (q *Queries) CountProjectRuns(ctx context.Context, projectID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countProjectRuns, projectID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countConsecutiveFailedRuns = `-- name: CountConsecutiveFailedRuns :one
+SELECT COUNT(*) FROM (
+  SELECT status FROM project_run
+  WHERE project_id = $1
+  ORDER BY created_at DESC
+  LIMIT $2
+) sub
+WHERE sub.status = 'failed'
+`
+
+type CountConsecutiveFailedRunsParams struct {
+	ProjectID  pgtype.UUID `json:"project_id"`
+	LimitCount int32       `json:"limit_count"`
+}
+
+func (q *Queries) CountConsecutiveFailedRuns(ctx context.Context, arg CountConsecutiveFailedRunsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countConsecutiveFailedRuns, arg.ProjectID, arg.LimitCount)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }

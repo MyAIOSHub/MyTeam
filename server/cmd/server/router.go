@@ -84,6 +84,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	projectLifecycle := service.NewProjectLifecycleService(queries, hub, bus, h.Scheduler)
 	projectLifecycle.Start()
 
+	// Project scheduler service (Phase 5) - triggers scheduled and recurring projects
+	projectScheduler := service.NewProjectSchedulerService(queries, h.Scheduler, bus)
+	go projectScheduler.Start(context.Background())
+
+	// Monitor active workflow steps for timeouts (Phase 2).
+	go h.Scheduler.MonitorActiveSteps(context.Background())
+
 	// File indexer service (Phase 4) - indexes files from messages and workflow outputs
 	fileIndexer := service.NewFileIndexerService(queries, bus)
 	fileIndexer.Start()
