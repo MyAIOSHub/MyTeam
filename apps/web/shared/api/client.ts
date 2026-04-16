@@ -41,6 +41,8 @@ import type {
   Project,
   ProjectVersion,
   ProjectRun,
+  ProjectBranch,
+  ProjectResult,
   CreateProjectFromChatRequest,
   FileIndex,
   SearchResponse,
@@ -802,6 +804,14 @@ export class ApiClient {
 
   async listProjectRuns(id: string): Promise<ProjectRun[]> {
     return this.fetch(`/api/projects/${id}/runs`);
+  }
+
+  async listProjectBranches(projectId: string): Promise<ProjectBranch[]> {
+    return this.fetch(`/api/projects/${projectId}/branches`);
+  }
+
+  async getProjectResult(projectId: string, runId: string): Promise<ProjectResult> {
+    return this.fetch(`/api/projects/${projectId}/runs/${runId}/result`);
   }
 
   async approvePlan(projectId: string): Promise<void> {

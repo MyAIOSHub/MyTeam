@@ -55,20 +55,24 @@ import type { WorkflowStep } from "@/shared/types/workflow";
 import type { Message } from "@/shared/types/messaging";
 
 const STATUS_BADGE: Record<ProjectStatus, string> = {
-  not_started: "bg-accent text-muted-foreground border-border",
+  draft: "bg-accent text-muted-foreground border-border",
+  scheduled: "bg-[rgba(94,106,210,0.15)] text-[#8b9cf7] border-[rgba(94,106,210,0.25)]",
   running: "bg-[rgba(94,106,210,0.15)] text-[#8b9cf7] border-[rgba(94,106,210,0.25)]",
   paused: "bg-[rgba(255,180,50,0.15)] text-[#f0b440] border-[rgba(255,180,50,0.25)]",
   completed: "bg-[rgba(39,166,68,0.15)] text-[#4ade80] border-[rgba(39,166,68,0.25)]",
   failed: "bg-[rgba(239,68,68,0.15)] text-[#f87171] border-[rgba(239,68,68,0.25)]",
+  stopped: "bg-accent text-muted-foreground/60 border-border",
   archived: "bg-accent text-muted-foreground/60 border-border",
 };
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
-  not_started: "未开始",
+  draft: "草稿",
+  scheduled: "已调度",
   running: "运行中",
   paused: "已暂停",
   completed: "已完成",
   failed: "失败",
+  stopped: "已停止",
   archived: "已归档",
 };
 
@@ -228,8 +232,8 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
   useEffect(() => {
     if (currentProject) {
       setTitleValue(currentProject.title);
-      if (currentProject.plan?.steps) {
-        setPlanSteps(currentProject.plan.steps as PlanEditorStep[]);
+      if ((currentProject.plan as any)?.steps) {
+        setPlanSteps((currentProject.plan as any).steps as PlanEditorStep[]);
       }
     }
   }, [currentProject]);
@@ -455,7 +459,7 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
             <span className="text-sm text-muted-foreground">
               {currentProject.schedule_type === "one_time"
                 ? "一次性"
-                : currentProject.schedule_type === "scheduled"
+                : currentProject.schedule_type === "scheduled_once"
                   ? "定时"
                   : "周期性"}
             </span>
@@ -566,7 +570,7 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
 
             {/* Start execution button */}
             {approvalStatus === "approved" &&
-              currentProject.status === "not_started" && (
+              currentProject.status === "draft" && (
                 <div className="mt-4">
                   <Button
                     onClick={handleStartExecution}
@@ -652,13 +656,13 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
                   </div>
                 )}
               </div>
-              {activeRun.failure_reason && (
+              {(activeRun as any).failure_reason && (
                 <div className="border border-[rgba(239,68,68,0.3)] rounded-lg p-3 bg-[rgba(239,68,68,0.05)]">
                   <div className="text-sm font-medium text-destructive">
                     失败原因
                   </div>
                   <div className="text-sm text-muted-foreground mt-1">
-                    {activeRun.failure_reason}
+                    {(activeRun as any).failure_reason}
                   </div>
                 </div>
               )}
@@ -855,7 +859,7 @@ function RunSummaryBar({
   run,
   steps,
 }: {
-  run: ProjectRun;
+  run: { id: string; status: string; start_at?: string; end_at?: string };
   steps: WorkflowStep[];
 }) {
   const completedCount = steps.filter((s) => s.status === "completed").length;

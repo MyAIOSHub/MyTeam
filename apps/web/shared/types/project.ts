@@ -11,18 +11,49 @@ export interface Project {
   creator_owner_id: string;
   created_at: string;
   updated_at: string;
-  // Joined fields (from API)
-  plan?: Plan;
-  active_run?: ProjectRun;
+  plan?: PlanSummary;
+  active_run?: RunSummary;
 }
 
-export type ProjectStatus = 'not_started' | 'running' | 'paused' | 'completed' | 'failed' | 'archived';
-export type ProjectScheduleType = 'one_time' | 'scheduled' | 'recurring';
+export type ProjectStatus =
+  | 'draft'
+  | 'scheduled'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'stopped'
+  | 'archived';
+
+export type ProjectScheduleType = 'one_time' | 'scheduled_once' | 'recurring';
+
+export interface PlanSummary {
+  id: string;
+  title: string;
+  approval_status: string;
+}
+
+export interface RunSummary {
+  id: string;
+  status: string;
+  start_at?: string;
+}
 
 export interface SourceConversation {
   conversation_id: string;
   type: 'channel' | 'dm' | 'thread';
   snapshot_at?: string;
+}
+
+export interface ProjectBranch {
+  id: string;
+  project_id: string;
+  name: string;
+  parent_branch_id?: string;
+  is_default: boolean;
+  status: 'active' | 'merged' | 'archived';
+  created_by: string;
+  created_at: string;
 }
 
 export interface ProjectVersion {
@@ -31,10 +62,11 @@ export interface ProjectVersion {
   parent_version_id?: string;
   version_number: number;
   branch_name?: string;
+  branch_id?: string;
   fork_reason?: string;
-  plan_snapshot?: any;
-  workflow_snapshot?: any;
-  version_status: 'active' | 'archived';
+  plan_snapshot?: unknown;
+  workflow_snapshot?: unknown;
+  version_status: 'active' | 'ready' | 'running' | 'completed' | 'failed' | 'cancelled' | 'archived';
   created_by?: string;
   created_at: string;
 }
@@ -46,14 +78,37 @@ export interface ProjectRun {
   status: RunStatus;
   start_at?: string;
   end_at?: string;
-  step_logs: any[];
-  output_refs: any[];
+  step_logs: unknown[];
+  output_refs: unknown[];
   failure_reason?: string;
   retry_count: number;
   created_at: string;
 }
 
-export type RunStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+export type RunStatus =
+  | 'pending'
+  | 'queued'
+  | 'running'
+  | 'blocked'
+  | 'paused'
+  | 'success'
+  | 'partial_success'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface ProjectResult {
+  id: string;
+  run_id: string;
+  project_id: string;
+  version_id?: string;
+  summary?: string;
+  artifacts: unknown[];
+  deliverables: unknown[];
+  acceptance_status: 'pending' | 'accepted' | 'rejected';
+  accepted_by?: string;
+  created_at: string;
+}
 
 export interface CreateProjectFromChatRequest {
   title: string;
@@ -63,6 +118,5 @@ export interface CreateProjectFromChatRequest {
   cron_expr?: string;
 }
 
-// Re-export Plan from workflow since project references it
 import type { Plan } from './workflow';
 export type { Plan };

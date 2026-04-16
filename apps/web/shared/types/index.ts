@@ -61,9 +61,13 @@ export type {
   ProjectStatus,
   ProjectScheduleType,
   SourceConversation,
+  PlanSummary,
+  RunSummary,
+  ProjectBranch,
   ProjectVersion,
   ProjectRun,
   RunStatus,
+  ProjectResult,
   CreateProjectFromChatRequest,
 } from "./project";
 export type { FileIndex, FileSnapshot, WorkspaceMetrics } from "./file";

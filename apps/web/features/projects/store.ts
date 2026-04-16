@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { Project, ProjectVersion, ProjectRun, CreateProjectFromChatRequest } from "@/shared/types";
+import type { Project, ProjectVersion, ProjectRun, ProjectBranch, ProjectResult, CreateProjectFromChatRequest } from "@/shared/types";
 import { toast } from "sonner";
 import { api } from "@/shared/api";
 import { createLogger } from "@/shared/logger";
@@ -13,6 +13,8 @@ interface ProjectState {
   currentProject: Project | null;
   versions: ProjectVersion[];
   runs: ProjectRun[];
+  branches: ProjectBranch[];
+  currentResult: ProjectResult | null;
   loading: boolean;
 }
 
@@ -28,6 +30,8 @@ interface ProjectActions {
   fetchRuns: (id: string) => Promise<void>;
   approvePlan: (projectId: string) => Promise<void>;
   rejectPlan: (projectId: string, reason: string) => Promise<void>;
+  fetchBranches: (projectId: string) => Promise<void>;
+  fetchResult: (projectId: string, runId: string) => Promise<void>;
 }
 
 export const useProjectStore = create<ProjectState & ProjectActions>((set, get) => ({
@@ -35,6 +39,8 @@ export const useProjectStore = create<ProjectState & ProjectActions>((set, get) 
   currentProject: null,
   versions: [],
   runs: [],
+  branches: [],
+  currentResult: null,
   loading: true,
 
   fetch: async () => {
@@ -153,6 +159,20 @@ export const useProjectStore = create<ProjectState & ProjectActions>((set, get) 
     } catch (err) {
       logger.error("reject plan failed", err);
       toast.error("拒绝计划失败");
+    }
+  },
+
+  fetchBranches: async (projectId: string) => {
+    const branches = await api.listProjectBranches(projectId);
+    set({ branches });
+  },
+
+  fetchResult: async (projectId: string, runId: string) => {
+    try {
+      const result = await api.getProjectResult(projectId, runId);
+      set({ currentResult: result });
+    } catch {
+      set({ currentResult: null });
     }
   },
 }));
