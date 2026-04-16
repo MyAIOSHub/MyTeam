@@ -328,6 +328,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				})
 			})
 
+			r.Post("/api/threads/{threadID}/promote", h.PromoteThread)
+
 			r.Route("/api/channels", func(r chi.Router) {
 				r.Post("/", h.CreateChannel)
 				r.Get("/", h.ListChannels)
