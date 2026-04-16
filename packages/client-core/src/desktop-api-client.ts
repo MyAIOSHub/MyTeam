@@ -5,6 +5,7 @@ import type {
   Conversation,
   FileIndex,
   MemberWithUser,
+  Message,
   Project,
   User,
   Workspace,
@@ -156,6 +157,65 @@ export class DesktopApiClient {
     return this.request(`/api/projects/${projectId}`);
   }
 
+  async createProject(data: {
+    title: string;
+    description?: string;
+    schedule_type?: string;
+  }): Promise<unknown> {
+    return this.request("/api/projects", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateProject(id: string, data: Record<string, unknown>): Promise<unknown> {
+    return this.request(`/api/projects/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProject(id: string): Promise<void> {
+    return this.request(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  async listProjectBranches(projectId: string): Promise<unknown[]> {
+    return this.request(`/api/projects/${projectId}/branches`);
+  }
+
+  async listProjectVersions(projectId: string): Promise<unknown[]> {
+    return this.request(`/api/projects/${projectId}/versions`);
+  }
+
+  async listProjectRuns(projectId: string): Promise<unknown[]> {
+    return this.request(`/api/projects/${projectId}/runs`);
+  }
+
+  async getProjectResult(projectId: string, runId: string): Promise<unknown> {
+    return this.request(`/api/projects/${projectId}/runs/${runId}/result`);
+  }
+
+  async approvePlan(projectId: string): Promise<void> {
+    return this.request(`/api/projects/${projectId}/approve`, { method: "POST" });
+  }
+
+  async rejectPlan(projectId: string, reason: string): Promise<void> {
+    return this.request(`/api/projects/${projectId}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  async forkProject(
+    projectId: string,
+    data: { branch_name: string; fork_reason?: string },
+  ): Promise<unknown> {
+    return this.request(`/api/projects/${projectId}/fork`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   async listFiles(params?: {
     source_type?: string;
     source_id?: string;
@@ -190,7 +250,7 @@ export class DesktopApiClient {
     session_id?: string;
     limit?: number;
     offset?: number;
-  }): Promise<{ messages: unknown[] }> {
+  }): Promise<{ messages: Message[] }> {
     const search = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
       if (value != null) {
@@ -198,6 +258,48 @@ export class DesktopApiClient {
       }
     }
     return this.request(`/api/messages?${search.toString()}`);
+  }
+
+  async sendMessage(params: {
+    channel_id?: string;
+    recipient_id?: string;
+    recipient_type?: string;
+    content: string;
+    content_type?: string;
+    parent_message_id?: string;
+    file_id?: string;
+    file_name?: string;
+    file_size?: number;
+    file_content_type?: string;
+  }): Promise<Message> {
+    return this.request("/api/messages", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+
+  async createChannel(params: {
+    name: string;
+    description?: string;
+  }): Promise<Channel> {
+    return this.request("/api/channels", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+
+  async sendTyping(params: {
+    channel_id?: string;
+    is_typing: boolean;
+  }): Promise<void> {
+    return this.request("/api/typing", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+
+  async listThreadMessages(parentId: string): Promise<{ messages: Message[] }> {
+    return this.request(`/api/messages/${parentId}/thread`);
   }
 
   async listAuditTrail(limit = 50): Promise<WorkspaceAuditEntry[]> {
