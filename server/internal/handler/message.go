@@ -256,7 +256,66 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/messages/conversations
 func (h *Handler) ListConversations(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"conversations": []any{}})
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := resolveWorkspaceID(r)
+
+	query := `
+		WITH dm_peers AS (
+			SELECT DISTINCT
+				CASE WHEN sender_id = $1 THEN recipient_id ELSE sender_id END AS peer_id,
+				CASE WHEN sender_id = $1 THEN recipient_type ELSE sender_type END AS peer_type
+			FROM message
+			WHERE workspace_id = $2
+			  AND (
+				(sender_id = $1 AND recipient_id IS NOT NULL AND recipient_id != '00000000-0000-0000-0000-000000000000'::uuid)
+				OR
+				(recipient_id = $1)
+			  )
+		)
+		SELECT
+			p.peer_id,
+			COALESCE(p.peer_type, 'member') AS peer_type,
+			COALESCE(a.name, u.name, '') AS peer_name,
+			0 AS unread_count
+		FROM dm_peers p
+		LEFT JOIN agent a ON p.peer_id = a.id
+		LEFT JOIN "user" u ON p.peer_id = u.id
+		ORDER BY peer_name
+	`
+
+	rows, err := h.DB.Query(r.Context(), query, parseUUID(userID), parseUUID(workspaceID))
+	if err != nil {
+		slog.Warn("list conversations failed", "error", err)
+		writeJSON(w, http.StatusOK, map[string]any{"conversations": []any{}})
+		return
+	}
+	defer rows.Close()
+
+	type conversation struct {
+		PeerID      string `json:"peer_id"`
+		PeerType    string `json:"peer_type"`
+		PeerName    string `json:"peer_name,omitempty"`
+		UnreadCount int    `json:"unread_count"`
+	}
+
+	var convs []conversation
+	for rows.Next() {
+		var c conversation
+		var peerUUID pgtype.UUID
+		if err := rows.Scan(&peerUUID, &c.PeerType, &c.PeerName, &c.UnreadCount); err != nil {
+			continue
+		}
+		c.PeerID = uuidToString(peerUUID)
+		convs = append(convs, c)
+	}
+
+	if convs == nil {
+		convs = []conversation{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"conversations": convs})
 }
 
 // GET /api/messages/{messageID}/thread
