@@ -342,8 +342,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Patch("/visibility", h.UpdateChannelVisibility)
 					r.Patch("/category", h.UpdateChannelCategory)
 					r.Post("/transfer-founder", h.TransferFounder)
+					r.Post("/split", h.SplitChannel)
+					r.Post("/merge-request", h.CreateMergeRequest)
 				})
 			})
+
+			// Merge requests
+			r.Post("/api/merge-requests/{mergeID}/approve", h.ApproveMergeRequest)
 
 			// Listen (long-poll)
 			r.Get("/api/listen", h.Listen)
