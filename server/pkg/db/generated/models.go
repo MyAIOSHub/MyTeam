@@ -460,6 +460,24 @@ type ProjectBranch struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
+type ProjectPr struct {
+	ID              pgtype.UUID        `json:"id"`
+	ProjectID       pgtype.UUID        `json:"project_id"`
+	SourceBranchID  pgtype.UUID        `json:"source_branch_id"`
+	TargetBranchID  pgtype.UUID        `json:"target_branch_id"`
+	SourceVersionID pgtype.UUID        `json:"source_version_id"`
+	Title           string             `json:"title"`
+	Description     pgtype.Text        `json:"description"`
+	Status          string             `json:"status"`
+	HasConflicts    bool               `json:"has_conflicts"`
+	MergedVersionID pgtype.UUID        `json:"merged_version_id"`
+	CreatedBy       pgtype.UUID        `json:"created_by"`
+	MergedBy        pgtype.UUID        `json:"merged_by"`
+	MergedAt        pgtype.Timestamptz `json:"merged_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ProjectContext struct {
 	ID                pgtype.UUID        `json:"id"`
 	ProjectID         pgtype.UUID        `json:"project_id"`

@@ -110,6 +110,23 @@ export interface ProjectResult {
   created_at: string;
 }
 
+export interface ProjectPR {
+  id: string;
+  project_id: string;
+  source_branch_id: string;
+  target_branch_id: string;
+  source_version_id: string;
+  title: string;
+  description?: string;
+  status: 'open' | 'merged' | 'closed' | 'needs_review';
+  has_conflicts: boolean;
+  merged_version_id?: string;
+  created_by: string;
+  merged_by?: string;
+  merged_at?: string;
+  created_at: string;
+}
+
 export interface CreateProjectFromChatRequest {
   title: string;
   source_refs: { type: 'channel' | 'dm' | 'thread'; id: string }[];

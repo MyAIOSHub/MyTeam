@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { Project, ProjectVersion, ProjectRun, ProjectBranch, ProjectResult, ProjectContext, CreateProjectFromChatRequest } from "@/shared/types";
+import type { Project, ProjectVersion, ProjectRun, ProjectBranch, ProjectResult, ProjectContext, ProjectPR, CreateProjectFromChatRequest } from "@/shared/types";
 import { toast } from "sonner";
 import { api } from "@/shared/api";
 import { createLogger } from "@/shared/logger";
@@ -16,6 +16,7 @@ interface ProjectState {
   branches: ProjectBranch[];
   currentResult: ProjectResult | null;
   contexts: ProjectContext[];
+  prs: ProjectPR[];
   loading: boolean;
 }
 
@@ -35,6 +36,10 @@ interface ProjectActions {
   fetchResult: (projectId: string, runId: string) => Promise<void>;
   fetchContexts: (projectId: string) => Promise<void>;
   importContext: (projectId: string, data: { source_type: string; source_id: string; date_from?: string; date_to?: string }) => Promise<void>;
+  fetchPRs: (projectId: string) => Promise<void>;
+  createPR: (projectId: string, data: { source_branch_id: string; target_branch_id: string; source_version_id: string; title: string; description?: string }) => Promise<ProjectPR>;
+  mergePR: (projectId: string, prId: string) => Promise<void>;
+  closePR: (projectId: string, prId: string) => Promise<void>;
 }
 
 export const useProjectStore = create<ProjectState & ProjectActions>((set, get) => ({
@@ -45,6 +50,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>((set, get) 
   branches: [],
   currentResult: null,
   contexts: [],
+  prs: [],
   loading: true,
 
   fetch: async () => {
@@ -192,5 +198,34 @@ export const useProjectStore = create<ProjectState & ProjectActions>((set, get) 
   importContext: async (projectId: string, data) => {
     const context = await api.importProjectContext(projectId, data);
     set((s) => ({ contexts: [context, ...s.contexts] }));
+  },
+
+  fetchPRs: async (projectId: string) => {
+    try {
+      const prs = await api.listProjectPRs(projectId);
+      set({ prs });
+    } catch (err) {
+      logger.error("fetch PRs failed", err);
+    }
+  },
+
+  createPR: async (projectId: string, data) => {
+    const pr = await api.createProjectPR(projectId, data);
+    set((s) => ({ prs: [pr, ...s.prs] }));
+    return pr;
+  },
+
+  mergePR: async (projectId: string, prId: string) => {
+    await api.mergeProjectPR(projectId, prId);
+    set((s) => ({
+      prs: s.prs.map((pr) => pr.id === prId ? { ...pr, status: 'merged' as const } : pr),
+    }));
+  },
+
+  closePR: async (projectId: string, prId: string) => {
+    await api.closeProjectPR(projectId, prId);
+    set((s) => ({
+      prs: s.prs.map((pr) => pr.id === prId ? { ...pr, status: 'closed' as const } : pr),
+    }));
   },
 }));

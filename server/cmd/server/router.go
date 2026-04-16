@@ -407,6 +407,11 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Get("/files", h.GetFilesByProject)
 					r.Post("/import-context", h.ImportProjectContext)
 					r.Get("/contexts", h.ListProjectContexts)
+					r.Post("/prs", h.CreateProjectPR)
+					r.Get("/prs", h.ListProjectPRs)
+					r.Get("/prs/{prID}", h.GetProjectPR)
+					r.Post("/prs/{prID}/merge", h.MergeProjectPR)
+					r.Post("/prs/{prID}/close", h.CloseProjectPR)
 				})
 			})
 

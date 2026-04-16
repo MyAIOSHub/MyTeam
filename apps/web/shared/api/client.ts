@@ -44,6 +44,7 @@ import type {
   ProjectBranch,
   ProjectResult,
   ProjectContext,
+  ProjectPR,
   CreateProjectFromChatRequest,
   FileIndex,
   SearchResponse,
@@ -813,6 +814,30 @@ export class ApiClient {
 
   async getProjectResult(projectId: string, runId: string): Promise<ProjectResult> {
     return this.fetch(`/api/projects/${projectId}/runs/${runId}/result`);
+  }
+
+  async listProjectPRs(projectId: string): Promise<ProjectPR[]> {
+    return this.fetch(`/api/projects/${projectId}/prs`);
+  }
+
+  async createProjectPR(projectId: string, data: {
+    source_branch_id: string;
+    target_branch_id: string;
+    source_version_id: string;
+    title: string;
+    description?: string;
+  }): Promise<ProjectPR> {
+    return this.fetch(`/api/projects/${projectId}/prs`, {
+      method: 'POST', body: JSON.stringify(data),
+    });
+  }
+
+  async mergeProjectPR(projectId: string, prId: string): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/prs/${prId}/merge`, { method: 'POST' });
+  }
+
+  async closeProjectPR(projectId: string, prId: string): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/prs/${prId}/close`, { method: 'POST' });
   }
 
   async approvePlan(projectId: string): Promise<void> {

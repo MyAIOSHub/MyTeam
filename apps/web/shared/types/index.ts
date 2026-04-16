@@ -69,6 +69,7 @@ export type {
   RunStatus,
   ProjectResult,
   ProjectContext,
+  ProjectPR,
   TaskBrief,
   CreateProjectFromChatRequest,
 } from "./project";

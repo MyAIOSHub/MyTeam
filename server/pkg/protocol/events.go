@@ -77,6 +77,9 @@ const (
 	EventProjectStatusChanged = "project:status_changed"
 
 	EventProjectBranchCreated  = "project:branch_created"
+	EventProjectPRCreated      = "project:pr_created"
+	EventProjectPRMerged       = "project:pr_merged"
+	EventProjectPRClosed       = "project:pr_closed"
 	EventProjectVersionCreated = "project:version_created"
 	EventProjectRunStarted     = "project:run_started"
 	EventProjectRunCompleted   = "project:run_completed"
