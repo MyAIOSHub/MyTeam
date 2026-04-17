@@ -3,8 +3,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -14,17 +17,33 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// ListThreads - GET /api/channels/{channelID}/threads
-// Returns threads for a channel, ordered by last_activity_at DESC.
+// ListThreads - GET /api/channels/{channelID}/threads?limit=N&offset=M
+// Returns threads for a channel, ordered by last_activity_at DESC. Pagination
+// defaults: limit=50 (max 200), offset=0.
 func (h *Handler) ListThreads(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelID")
 	if _, ok := requireUserID(w, r); !ok {
 		return
 	}
 
+	limit := 50
+	if s := r.URL.Query().Get("limit"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	offset := 0
+	if s := r.URL.Query().Get("offset"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
 	threads, err := h.Queries.ListThreadsByChannel(r.Context(), db.ListThreadsByChannelParams{
-		ChannelID: parseUUID(channelID),
-		Status:    pgtype.Text{},
+		ChannelID:   parseUUID(channelID),
+		Status:      pgtype.Text{},
+		LimitCount:  int32(limit),
+		OffsetCount: int32(offset),
 	})
 	if err != nil {
 		slog.Warn("list threads failed", "error", err, "channel_id", channelID)
@@ -83,12 +102,10 @@ func (h *Handler) CreateThread(w http.ResponseWriter, r *http.Request) {
 		Metadata      json.RawMessage `json:"metadata,omitempty"`
 	}
 	var req CreateRequest
-	// Body is optional — empty body is allowed.
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid request body")
-			return
-		}
+	// Body is optional — empty body (including chunked with no content) is allowed.
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
 	}
 
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)

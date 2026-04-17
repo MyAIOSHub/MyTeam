@@ -50,7 +50,8 @@ SELECT * FROM thread WHERE root_message_id = $1 LIMIT 1;
 SELECT * FROM thread
 WHERE channel_id = @channel_id
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status')::text)
-ORDER BY last_activity_at DESC NULLS LAST, created_at DESC;
+ORDER BY last_activity_at DESC NULLS LAST, created_at DESC
+LIMIT @limit_count OFFSET @offset_count;
 
 -- name: ListThreadsByWorkspace :many
 SELECT * FROM thread

@@ -176,15 +176,23 @@ SELECT id, channel_id, title, reply_count, last_reply_at, created_at, workspace_
 WHERE channel_id = $1
   AND ($2::text IS NULL OR status = $2::text)
 ORDER BY last_activity_at DESC NULLS LAST, created_at DESC
+LIMIT $4 OFFSET $3
 `
 
 type ListThreadsByChannelParams struct {
-	ChannelID pgtype.UUID `json:"channel_id"`
-	Status    pgtype.Text `json:"status"`
+	ChannelID   pgtype.UUID `json:"channel_id"`
+	Status      pgtype.Text `json:"status"`
+	OffsetCount int32       `json:"offset_count"`
+	LimitCount  int32       `json:"limit_count"`
 }
 
 func (q *Queries) ListThreadsByChannel(ctx context.Context, arg ListThreadsByChannelParams) ([]Thread, error) {
-	rows, err := q.db.Query(ctx, listThreadsByChannel, arg.ChannelID, arg.Status)
+	rows, err := q.db.Query(ctx, listThreadsByChannel,
+		arg.ChannelID,
+		arg.Status,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
 	if err != nil {
 		return nil, err
 	}
