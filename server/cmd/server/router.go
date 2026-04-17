@@ -195,6 +195,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 			r.Delete("/{id}", h.RevokePersonalAccessToken)
 		})
 
+		// Provider registry (static catalog of execution providers)
+		providerHandler := handler.NewProviderHandler()
+		r.Get("/api/providers", providerHandler.List)
+
 		// --- Workspace-scoped routes (all require workspace membership) ---
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceMember(queries))
