@@ -20,6 +20,7 @@ import type {
   IssueReaction,
   Workspace,
   WorkspaceRepo,
+  WorkspaceSecretMeta,
   MemberWithUser,
   User,
   Skill,
@@ -499,6 +500,28 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+  }
+
+  // Workspace Secrets (admin/owner only)
+  async listWorkspaceSecrets(workspaceId: string): Promise<WorkspaceSecretMeta[]> {
+    return this.fetch<WorkspaceSecretMeta[]>(`/api/workspaces/${workspaceId}/secrets`);
+  }
+
+  async getWorkspaceSecret(workspaceId: string, key: string): Promise<{ key: string; value: string }> {
+    return this.fetch(`/api/workspaces/${workspaceId}/secrets/${encodeURIComponent(key)}`);
+  }
+
+  async setWorkspaceSecret(workspaceId: string, key: string, value: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/secrets/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
+  }
+
+  async deleteWorkspaceSecret(workspaceId: string, key: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/secrets/${encodeURIComponent(key)}`, {
+      method: "DELETE",
     });
   }
 

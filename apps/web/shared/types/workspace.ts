@@ -45,3 +45,14 @@ export interface MemberWithUser {
   email: string;
   avatar_url: string | null;
 }
+
+export interface WorkspaceSecretMeta {
+  key: string;
+  created_by: string;
+  created_at: string;
+  rotated_at?: string;
+}
+
+export interface SetWorkspaceSecretRequest {
+  value: string;
+}
