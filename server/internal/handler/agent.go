@@ -286,9 +286,11 @@ type UpdateAgentRequest struct {
 // admin/owner may mutate agent state. Implemented with auth.Guards so the
 // permission policy is centralized and testable.
 //
-// System agents (owner_id = NULL) have no Agent Owner — RequireAgentOwner
-// returns a non-forbidden error there; we treat that as "fall through to
-// admin check" rather than a 500.
+// System agents (owner_id = NULL) have no Agent Owner — we skip the owner
+// guard in that case and rely solely on the admin check. For personal
+// agents, we only fall through to the admin check on a genuine
+// ErrForbidden; any other error (DB timeout, lookup failure) is surfaced
+// as 500 so infrastructure problems don't get masked as 403.
 func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) bool {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -311,26 +313,35 @@ func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent d
 		return false
 	}
 
-	// Agent owner is always allowed. Any error (forbidden, no rows, no
-	// owner) falls through to the admin check; we don't surface the
-	// underlying error because the second guard will produce the final
-	// verdict.
-	if err := h.Guards.RequireAgentOwner(r.Context(), agentUUID, userUUID); err == nil {
-		return true
+	// Agent owner is always allowed — but skip the guard entirely for
+	// system agents (no owner_id) so the adapter's "no owner" sentinel
+	// doesn't get misclassified as an infra error.
+	if agent.OwnerID.Valid {
+		err := h.Guards.RequireAgentOwner(r.Context(), agentUUID, userUUID)
+		if err == nil {
+			return true
+		}
+		if !errors.Is(err, auth.ErrForbidden) {
+			slog.Warn("canManageAgent: RequireAgentOwner infra error",
+				"error", err, "agent_id", agentUUID)
+			writeError(w, http.StatusInternalServerError, "permission check failed")
+			return false
+		}
 	}
 
 	// Not the agent owner; allow workspace admin/owner.
-	if err := h.Guards.RequireAdminOrAbove(r.Context(), workspaceUUID, userUUID); err != nil {
-		if errors.Is(err, auth.ErrForbidden) {
-			writeError(w, http.StatusForbidden, "only the agent owner or a workspace admin can manage this agent")
-			return false
-		}
-		// Member lookup failed (e.g. no member row). Treat the same as
-		// forbidden: the request originator is not part of this workspace.
-		writeError(w, http.StatusForbidden, "only the agent owner or a workspace admin can manage this agent")
+	adminErr := h.Guards.RequireAdminOrAbove(r.Context(), workspaceUUID, userUUID)
+	if adminErr == nil {
+		return true
+	}
+	if !errors.Is(adminErr, auth.ErrForbidden) {
+		slog.Warn("canManageAgent: RequireAdminOrAbove infra error",
+			"error", adminErr, "workspace_id", workspaceUUID)
+		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return false
 	}
-	return true
+	writeError(w, http.StatusForbidden, "only the agent owner or a workspace admin can manage this agent")
+	return false
 }
 
 func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {

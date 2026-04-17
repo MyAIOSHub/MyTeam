@@ -51,3 +51,14 @@ UPDATE agent_runtime SET last_heartbeat_at = last_seen_at WHERE last_heartbeat_a
 -- ===== Provider value normalization =====
 UPDATE agent_runtime SET provider = 'cloud_llm' WHERE provider = 'multica_agent';
 UPDATE agent_runtime SET provider = 'claude'    WHERE provider = 'legacy_local';
+
+-- ===== Scope: 'session' → 'conversation' =====
+-- Plan 1 added 'conversation' as a valid scope value alongside legacy 'session'.
+-- Plan 2 frontend drops 'session'. Migrate any residual rows now.
+UPDATE agent SET scope = 'conversation' WHERE scope = 'session';
+
+-- Tighten the CHECK to drop 'session'.
+ALTER TABLE agent DROP CONSTRAINT IF EXISTS agent_scope_values_check;
+ALTER TABLE agent
+    ADD CONSTRAINT agent_scope_values_check
+    CHECK (scope IS NULL OR scope IN ('account', 'conversation', 'project', 'file'));
