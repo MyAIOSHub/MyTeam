@@ -5,10 +5,16 @@
 -- Pre-flight: abort if any session row lacks a migration map entry.
 -- Migration 052 should have backfilled every session.id into
 -- session_migration_map. If anything remains, refuse to drop.
+-- Skip the check if session was already dropped (idempotent rerun).
 DO $$
 DECLARE
   unmapped INTEGER;
 BEGIN
+  IF to_regclass('public.session') IS NULL THEN
+    RAISE NOTICE 'session table already dropped; skipping preflight';
+    RETURN;
+  END IF;
+
   SELECT COUNT(*) INTO unmapped
   FROM session s
   LEFT JOIN session_migration_map m ON m.session_id = s.id
