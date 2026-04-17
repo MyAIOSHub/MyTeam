@@ -608,7 +608,7 @@ export class HubClient {
 
     const disposition = response.headers.get("content-disposition") || "";
     const match = disposition.match(/filename="([^"]+)"/);
-    const fileName = match ? match[1] : `file-${fileId}`;
+    const fileName = match && match[1] ? match[1] : `file-${fileId}`;
 
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);

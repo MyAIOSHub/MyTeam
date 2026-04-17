@@ -56,8 +56,9 @@ export function registerChatTool(server: import("@modelcontextprotocol/sdk/serve
         const result = await client.pollInteractions(state.agentId!, { afterId: lastId, limit: 50 });
         const interactions: Interaction[] = result.interactions ?? [];
 
-        if (interactions.length > 0) {
-          lastId = interactions[interactions.length - 1].id;
+        const last = interactions.at(-1);
+        if (last) {
+          lastId = last.id;
         }
 
         // Find reply from target agent with matching correlationId
