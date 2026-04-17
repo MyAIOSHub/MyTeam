@@ -12,18 +12,23 @@ import (
 )
 
 type AgentRuntimeResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	DaemonID    *string `json:"daemon_id"`
-	Name        string  `json:"name"`
-	RuntimeMode string  `json:"runtime_mode"`
-	Provider    string  `json:"provider"`
-	Status      string  `json:"status"`
-	DeviceInfo  string  `json:"device_info"`
-	Metadata    any     `json:"metadata"`
-	LastSeenAt  *string `json:"last_seen_at"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID               string  `json:"id"`
+	WorkspaceID      string  `json:"workspace_id"`
+	DaemonID         *string `json:"daemon_id"`
+	Name             string  `json:"name"`
+	RuntimeMode      string  `json:"runtime_mode"`
+	Mode             *string `json:"mode,omitempty"`
+	Provider         string  `json:"provider"`
+	Status           string  `json:"status"`
+	DeviceInfo       string  `json:"device_info"`
+	Metadata         any     `json:"metadata"`
+	ConcurrencyLimit int32   `json:"concurrency_limit"`
+	CurrentLoad      int32   `json:"current_load"`
+	LeaseExpiresAt   *string `json:"lease_expires_at,omitempty"`
+	LastHeartbeatAt  *string `json:"last_heartbeat_at,omitempty"`
+	LastSeenAt       *string `json:"last_seen_at"`
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
@@ -36,18 +41,23 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 	}
 
 	return AgentRuntimeResponse{
-		ID:          uuidToString(rt.ID),
-		WorkspaceID: uuidToString(rt.WorkspaceID),
-		DaemonID:    textToPtr(rt.DaemonID),
-		Name:        rt.Name,
-		RuntimeMode: rt.RuntimeMode,
-		Provider:    rt.Provider,
-		Status:      rt.Status,
-		DeviceInfo:  rt.DeviceInfo,
-		Metadata:    metadata,
-		LastSeenAt:  timestampToPtr(rt.LastSeenAt),
-		CreatedAt:   timestampToString(rt.CreatedAt),
-		UpdatedAt:   timestampToString(rt.UpdatedAt),
+		ID:               uuidToString(rt.ID),
+		WorkspaceID:      uuidToString(rt.WorkspaceID),
+		DaemonID:         textToPtr(rt.DaemonID),
+		Name:             rt.Name,
+		RuntimeMode:      rt.RuntimeMode,
+		Mode:             textToPtr(rt.Mode),
+		Provider:         rt.Provider,
+		Status:           rt.Status,
+		DeviceInfo:       rt.DeviceInfo,
+		Metadata:         metadata,
+		ConcurrencyLimit: rt.ConcurrencyLimit,
+		CurrentLoad:      rt.CurrentLoad,
+		LeaseExpiresAt:   timestampToPtr(rt.LeaseExpiresAt),
+		LastHeartbeatAt:  timestampToPtr(rt.LastHeartbeatAt),
+		LastSeenAt:       timestampToPtr(rt.LastSeenAt),
+		CreatedAt:        timestampToString(rt.CreatedAt),
+		UpdatedAt:        timestampToString(rt.UpdatedAt),
 	}
 }
 
