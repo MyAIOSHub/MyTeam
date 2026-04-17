@@ -184,16 +184,14 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Check for @mentions and trigger auto-reply
-	if h.AutoReplyService != nil {
-		mentions := ParseMentions(req.Content)
-		if len(mentions) > 0 {
-			h.AutoReplyService.CheckAndReply(r.Context(), mentions, workspaceID,
-				uuidToString(msg.ChannelID), msg)
-		}
-	}
-
-	// DM to agent: trigger auto-reply for direct messages sent to an agent.
+	// Channel @mention auto-reply is no longer triggered here. MediationService
+	// is the single gate for channel/thread routing — it subscribes to the
+	// "message:created" event published above and decides whether to dispatch
+	// AutoReplyService based on the unified routing priority + anti-loop rules
+	// (Plan 3 Task 6).
+	//
+	// Direct messages to an agent (no channel/thread context) still trigger
+	// AutoReply directly because they bypass routing entirely.
 	if h.AutoReplyService != nil && req.RecipientType != nil && *req.RecipientType == "agent" && req.RecipientID != nil && *req.RecipientID != "" {
 		go h.AutoReplyService.ReplyToDM(context.Background(), *req.RecipientID, workspaceID, senderID, msg)
 	}

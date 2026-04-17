@@ -11,6 +11,29 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countAgentRepliesInThread = `-- name: CountAgentRepliesInThread :one
+SELECT COUNT(*) FROM message
+WHERE thread_id = $1
+  AND sender_id = $2
+  AND sender_type = 'agent'
+  AND created_at >= $3
+`
+
+type CountAgentRepliesInThreadParams struct {
+	ThreadID  pgtype.UUID        `json:"thread_id"`
+	SenderID  pgtype.UUID        `json:"sender_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// Counts auto-replies issued by a specific agent inside a thread since a cutoff.
+// Used by MediationService anti-loop checks (Plan 3 Task 6).
+func (q *Queries) CountAgentRepliesInThread(ctx context.Context, arg CountAgentRepliesInThreadParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAgentRepliesInThread, arg.ThreadID, arg.SenderID, arg.CreatedAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUnreadMessages = `-- name: CountUnreadMessages :one
 SELECT COUNT(*) FROM message
 WHERE recipient_id = $1 AND recipient_type = $2 AND status = 'sent'
@@ -515,6 +538,71 @@ func (q *Queries) ListMessagesForOwnerAgents(ctx context.Context, arg ListMessag
 		arg.Offset,
 		arg.OwnerAgentIds,
 	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Message{}
+	for rows.Next() {
+		var i Message
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.SenderID,
+			&i.SenderType,
+			&i.ChannelID,
+			&i.RecipientID,
+			&i.RecipientType,
+			&i.SessionID,
+			&i.Content,
+			&i.ContentType,
+			&i.FileID,
+			&i.FileName,
+			&i.FileSize,
+			&i.FileContentType,
+			&i.Metadata,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ParentID,
+			&i.Type,
+			&i.IsImpersonated,
+			&i.ReplyExpected,
+			&i.ThreadID,
+			&i.EffectiveActorID,
+			&i.EffectiveActorType,
+			&i.RealOperatorID,
+			&i.RealOperatorType,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentThreadMessages = `-- name: ListRecentThreadMessages :many
+SELECT id, workspace_id, sender_id, sender_type, channel_id, recipient_id, recipient_type, session_id, content, content_type, file_id, file_name, file_size, file_content_type, metadata, status, created_at, updated_at, parent_id, type, is_impersonated, reply_expected, thread_id, effective_actor_id, effective_actor_type, real_operator_id, real_operator_type FROM (
+    SELECT id, workspace_id, sender_id, sender_type, channel_id, recipient_id, recipient_type, session_id, content, content_type, file_id, file_name, file_size, file_content_type, metadata, status, created_at, updated_at, parent_id, type, is_impersonated, reply_expected, thread_id, effective_actor_id, effective_actor_type, real_operator_id, real_operator_type FROM message
+    WHERE thread_id = $1
+    ORDER BY created_at DESC
+    LIMIT $2
+) latest
+ORDER BY created_at ASC
+`
+
+type ListRecentThreadMessagesParams struct {
+	ThreadID pgtype.UUID `json:"thread_id"`
+	Limit    int32       `json:"limit"`
+}
+
+// Returns the most recent N messages of a thread in chronological order.
+// Used by MediationService anti-loop tail-scan (Plan 3 Task 6).
+func (q *Queries) ListRecentThreadMessages(ctx context.Context, arg ListRecentThreadMessagesParams) ([]Message, error) {
+	rows, err := q.db.Query(ctx, listRecentThreadMessages, arg.ThreadID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

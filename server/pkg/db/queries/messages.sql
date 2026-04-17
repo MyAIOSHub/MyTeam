@@ -45,6 +45,26 @@ WHERE workspace_id = $1 AND sender_id = ANY(@owner_agent_ids::uuid[])
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
+-- name: CountAgentRepliesInThread :one
+-- Counts auto-replies issued by a specific agent inside a thread since a cutoff.
+-- Used by MediationService anti-loop checks (Plan 3 Task 6).
+SELECT COUNT(*) FROM message
+WHERE thread_id = $1
+  AND sender_id = $2
+  AND sender_type = 'agent'
+  AND created_at >= $3;
+
+-- name: ListRecentThreadMessages :many
+-- Returns the most recent N messages of a thread in chronological order.
+-- Used by MediationService anti-loop tail-scan (Plan 3 Task 6).
+SELECT * FROM (
+    SELECT * FROM message
+    WHERE thread_id = $1
+    ORDER BY created_at DESC
+    LIMIT $2
+) latest
+ORDER BY created_at ASC;
+
 -- name: InsertMessageWithAudit :one
 -- Inserts a message that records both the effective actor (whose voice the
 -- message speaks in) and the real operator (who actually performed the
