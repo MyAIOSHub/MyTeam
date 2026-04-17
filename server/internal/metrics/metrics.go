@@ -16,7 +16,7 @@ var (
 		prometheus.HistogramOpts{
 			Name:    "myteam_execution_duration_seconds",
 			Help:    "Per-execution duration in seconds.",
-			Buckets: []float64{0.5, 1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600},
+			Buckets: []float64{0.5, 1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 5400, 7200},
 		},
 		[]string{"runtime_mode", "provider", "status"},
 	)

@@ -4,6 +4,7 @@ package errcode
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 )
 
@@ -11,8 +12,12 @@ import (
 type Code struct {
 	Code       string `json:"code"`
 	HTTPStatus int    `json:"-"`
-	Retriable  bool   `json:"retriable"`
-	Message    string `json:"-"` // default message; callers can override
+	// Retriable hints to clients whether to auto-retry. Per PRD §13.4:
+	// when true, frontends should retry with exponential backoff up to 3
+	// times before surfacing "temporarily unavailable"; when false, the
+	// error message should be shown directly to the user.
+	Retriable bool   `json:"retriable"`
+	Message   string `json:"-"` // default message; callers can override
 }
 
 // Response is the JSON shape clients see.
@@ -88,5 +93,9 @@ func Write(w http.ResponseWriter, code Code, message string, details any) {
 	resp.Error.Retriable = code.Retriable
 	resp.Error.Details = details
 
-	_ = json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		// Status + headers already sent; can't recover.
+		// Log so the empty body doesn't go unnoticed.
+		slog.Warn("errcode.Write: failed to encode response", "code", code.Code, "error", err)
+	}
 }

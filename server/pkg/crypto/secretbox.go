@@ -22,12 +22,14 @@ var (
 	ErrCipherTooShort = errors.New("crypto: ciphertext too short")
 )
 
-// Encrypt seals plaintext under key with AES-256-GCM. Output layout is:
+// Encrypt seals plaintext under key with AES-256-GCM, binding additionalData
+// (Authenticated Data) to the ciphertext. additionalData is NOT encrypted but
+// MUST be supplied identically at Decrypt time. For workspace secrets, use
+// the canonical "<workspace_id>/<key_name>" string as AD to prevent
+// ciphertext transplantation across rows.
 //
-//	nonce (12 bytes) || ciphertext || tag (16 bytes)
-//
-// Nonce is freshly randomized; output is self-contained.
-func Encrypt(plaintext, key []byte) ([]byte, error) {
+// Output layout: nonce (12 bytes) || ciphertext || tag (16 bytes)
+func Encrypt(plaintext, key, additionalData []byte) ([]byte, error) {
 	if len(key) != KeySize {
 		return nil, ErrInvalidKey
 	}
@@ -46,12 +48,13 @@ func Encrypt(plaintext, key []byte) ([]byte, error) {
 	// Seal appends the tag; prepend nonce so decrypt can find it.
 	out := make([]byte, 0, len(nonce)+len(plaintext)+aead.Overhead())
 	out = append(out, nonce...)
-	out = aead.Seal(out, nonce, plaintext, nil)
+	out = aead.Seal(out, nonce, plaintext, additionalData)
 	return out, nil
 }
 
-// Decrypt inverses Encrypt. Returns an error on any tag mismatch.
-func Decrypt(ciphertext, key []byte) ([]byte, error) {
+// Decrypt inverses Encrypt. additionalData must match what was passed to
+// Encrypt; mismatched AD or any tag tampering returns an error.
+func Decrypt(ciphertext, key, additionalData []byte) ([]byte, error) {
 	if len(key) != KeySize {
 		return nil, ErrInvalidKey
 	}
@@ -68,5 +71,5 @@ func Decrypt(ciphertext, key []byte) ([]byte, error) {
 	}
 	nonce := ciphertext[:aead.NonceSize()]
 	body := ciphertext[aead.NonceSize():]
-	return aead.Open(nil, nonce, body, nil)
+	return aead.Open(nil, nonce, body, additionalData)
 }

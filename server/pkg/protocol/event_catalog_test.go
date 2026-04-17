@@ -10,8 +10,8 @@ func TestCatalogNonEmpty(t *testing.T) {
 
 func TestCatalogCount(t *testing.T) {
 	// Per PRD §2.2 — spot check count is in the expected range.
-	// 20 project + 8 account + 10 session + 3 inbox = 41 events.
-	want := 41
+	// 20 project + 9 account + 10 session + 3 inbox = 42 events.
+	want := 42
 	if len(EventCatalog) != want {
 		t.Errorf("expected %d events, got %d", want, len(EventCatalog))
 	}

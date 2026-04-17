@@ -1,3 +1,12 @@
+// Package protocol declares wire-level types and the canonical EventCatalog
+// per PRD §2.2.
+//
+// IMPORTANT: EventCatalog reflects the PRD §2.2 forward-looking event names.
+// Existing emitter constants in events.go and hub.go may use older naming
+// (e.g. catalog `plan:created` vs emitted `plan:generated`). Reconciliation
+// is tracked as a separate integration pass — when adding a NEW event, please
+// align both catalog and emitter to PRD naming. Do NOT silently bridge
+// catalog names to legacy emitter names.
 package protocol
 
 // EventDomain categorizes events for catalog/documentation purposes.
@@ -48,6 +57,7 @@ var EventCatalog = []EventDef{
 	{Type: "agent:created", Domain: DomainAccount, Description: "Agent created.", PayloadKeys: []string{"agent_id", "owner_id", "agent_type"}},
 	{Type: "agent:status_changed", Domain: DomainAccount, Description: "agent.status transitioned.", PayloadKeys: []string{"agent_id", "from", "to"}},
 	{Type: "agent:identity_card_updated", Domain: DomainAccount, Description: "identity_card fields changed.", PayloadKeys: []string{"agent_id", "updated_fields"}},
+	{Type: "agent:identity_card_auto_generated", Domain: DomainAccount, Description: "identity_card auto-generation pass produced an update.", PayloadKeys: []string{"agent_id", "model"}},
 	{Type: "runtime:online", Domain: DomainAccount, Description: "Runtime came online.", PayloadKeys: []string{"runtime_id"}},
 	{Type: "runtime:offline", Domain: DomainAccount, Description: "Runtime went offline.", PayloadKeys: []string{"runtime_id"}},
 	{Type: "runtime:degraded", Domain: DomainAccount, Description: "Runtime degraded.", PayloadKeys: []string{"runtime_id"}},
