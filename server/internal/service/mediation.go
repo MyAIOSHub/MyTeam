@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -623,32 +625,38 @@ func (s *MediationService) escalateInbox(ctx context.Context, slot db.ReplySlot,
 // this task; Plan 4 will add a proper metadata JSONB column on reply_slot.
 //
 // Returns true if the tier was newly applied; false if the slot was already
-// advanced to that tier (or beyond).
+// advanced to that tier (or beyond), or if the slot does not exist.
+//
+// The update is performed atomically in a single statement with a NOT LIKE
+// guard so two workers racing on the same slot cannot both succeed and post
+// duplicate inbox items.
 func (s *MediationService) markSlotTier(ctx context.Context, slotID pgtype.UUID, tier string) bool {
 	if s.DB == nil {
 		return false
 	}
-	tag := "[sla:" + tier + "]"
-	tag = strings.ToLower(tag)
+	tag := strings.ToLower("[sla:" + tier + "]")
 
-	// Idempotent guard: only apply if the tag is not already present.
-	row := s.DB.QueryRow(ctx, `
-		SELECT content_summary FROM reply_slot WHERE id = $1
-	`, slotID)
-	var summary pgtype.Text
-	if err := row.Scan(&summary); err != nil {
+	var updated int
+	err := s.DB.QueryRow(ctx, `
+		UPDATE reply_slot
+		SET content_summary = CASE
+			WHEN content_summary IS NULL OR content_summary = '' THEN $2
+			ELSE content_summary || ' ' || $2
+		END
+		WHERE id = $1
+		  AND (content_summary IS NULL
+		       OR lower(content_summary) NOT LIKE '%' || $3 || '%')
+		RETURNING 1
+	`, slotID, tag, tag).Scan(&updated)
+	if err != nil {
+		// ErrNoRows here means the guard matched (tag already present) or the
+		// slot was deleted — both are "not newly applied", not a hard error.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false
+		}
 		return false
 	}
-	if summary.Valid && strings.Contains(strings.ToLower(summary.String), tag) {
-		return false
-	}
-
-	newSummary := tag
-	if summary.Valid && summary.String != "" {
-		newSummary = summary.String + " " + tag
-	}
-	_, err := s.DB.Exec(ctx, `UPDATE reply_slot SET content_summary = $1 WHERE id = $2`, newSummary, slotID)
-	return err == nil
+	return updated == 1
 }
 
 // resolveOwnerForInbox finds the inbox recipient — preferring the channel
