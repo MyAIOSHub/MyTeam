@@ -541,6 +541,13 @@ type Session struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type SessionMigrationMap struct {
+	SessionID  pgtype.UUID        `json:"session_id"`
+	ChannelID  pgtype.UUID        `json:"channel_id"`
+	ThreadID   pgtype.UUID        `json:"thread_id"`
+	MigratedAt pgtype.Timestamptz `json:"migrated_at"`
+}
+
 type SessionParticipant struct {
 	SessionID       pgtype.UUID        `json:"session_id"`
 	ParticipantID   pgtype.UUID        `json:"participant_id"`
@@ -583,12 +590,36 @@ type TaskMessage struct {
 }
 
 type Thread struct {
-	ID          pgtype.UUID        `json:"id"`
-	ChannelID   pgtype.UUID        `json:"channel_id"`
-	Title       pgtype.Text        `json:"title"`
-	ReplyCount  int32              `json:"reply_count"`
-	LastReplyAt pgtype.Timestamptz `json:"last_reply_at"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ID             pgtype.UUID        `json:"id"`
+	ChannelID      pgtype.UUID        `json:"channel_id"`
+	Title          pgtype.Text        `json:"title"`
+	ReplyCount     int32              `json:"reply_count"`
+	LastReplyAt    pgtype.Timestamptz `json:"last_reply_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	RootMessageID  pgtype.UUID        `json:"root_message_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	CreatedByType  pgtype.Text        `json:"created_by_type"`
+	Status         string             `json:"status"`
+	Metadata       []byte             `json:"metadata"`
+	LastActivityAt pgtype.Timestamptz `json:"last_activity_at"`
+}
+
+type ThreadContextItem struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ThreadID        pgtype.UUID        `json:"thread_id"`
+	ItemType        string             `json:"item_type"`
+	Title           pgtype.Text        `json:"title"`
+	Body            pgtype.Text        `json:"body"`
+	Metadata        []byte             `json:"metadata"`
+	SourceMessageID pgtype.UUID        `json:"source_message_id"`
+	RetentionClass  string             `json:"retention_class"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	CreatedBy       pgtype.UUID        `json:"created_by"`
+	CreatedByType   pgtype.Text        `json:"created_by_type"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
 type User struct {

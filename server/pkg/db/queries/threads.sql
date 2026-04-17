@@ -1,24 +1,85 @@
 -- name: UpsertThread :one
-INSERT INTO thread (id, channel_id, title, reply_count, last_reply_at, created_at)
-VALUES ($1, $2, $3, 1, NOW(), NOW())
+INSERT INTO thread (id, channel_id, title, reply_count, last_reply_at, last_activity_at, created_at)
+VALUES ($1, $2, $3, 1, NOW(), NOW(), NOW())
 ON CONFLICT (id) DO UPDATE SET
-    reply_count = thread.reply_count + 1,
-    last_reply_at = NOW()
+    reply_count       = thread.reply_count + 1,
+    last_reply_at     = NOW(),
+    last_activity_at  = NOW()
 RETURNING *;
 
--- name: GetThread :one
-SELECT * FROM thread WHERE id = $1;
-
--- name: ListThreadsByChannel :many
-SELECT * FROM thread
-WHERE channel_id = $1
-ORDER BY last_reply_at DESC
-LIMIT $2 OFFSET $3;
-
 -- name: IncrementThreadReplyCount :exec
+-- Legacy increment kept for the current message handler. New callers should
+-- use IncrementThreadReply (member/agent only) and TouchThreadActivity
+-- (system messages). Migration to the new contract lands in Task 4.
 UPDATE thread
 SET reply_count = reply_count + 1, last_reply_at = NOW()
 WHERE id = $1;
 
 -- name: DeleteThread :exec
 DELETE FROM thread WHERE id = $1;
+
+-- ===== Plan 3 / Phase 1: Thread extension =====
+
+-- name: CreateThread :one
+INSERT INTO thread (
+    id, channel_id, workspace_id, root_message_id, issue_id,
+    title, status, created_by, created_by_type, metadata,
+    reply_count, last_reply_at, last_activity_at, created_at
+) VALUES (
+    COALESCE($1, gen_random_uuid()), $2, $3, $4, $5,
+    $6, COALESCE($7, 'active'), $8, $9, COALESCE($10, '{}'::jsonb),
+    0, NULL, now(), now()
+)
+RETURNING *;
+
+-- name: GetThread :one
+SELECT * FROM thread WHERE id = $1;
+
+-- name: GetThreadByRootMessage :one
+SELECT * FROM thread WHERE root_message_id = $1 LIMIT 1;
+
+-- name: ListThreadsByChannel :many
+SELECT * FROM thread
+WHERE channel_id = $1 AND ($2::text IS NULL OR status = $2)
+ORDER BY last_activity_at DESC NULLS LAST, created_at DESC;
+
+-- name: ListThreadsByWorkspace :many
+SELECT * FROM thread
+WHERE workspace_id = $1 AND ($2::text IS NULL OR status = $2)
+ORDER BY last_activity_at DESC NULLS LAST, created_at DESC
+LIMIT $3 OFFSET $4;
+
+-- name: ListThreadsByIssue :many
+SELECT * FROM thread
+WHERE issue_id = $1 AND ($2::text IS NULL OR status = $2)
+ORDER BY created_at DESC;
+
+-- name: UpdateThreadStatus :exec
+UPDATE thread
+SET status = $2
+WHERE id = $1;
+
+-- name: UpdateThreadTitle :exec
+UPDATE thread
+SET title = $2
+WHERE id = $1;
+
+-- name: UpdateThreadMetadata :exec
+UPDATE thread
+SET metadata = $2
+WHERE id = $1;
+
+-- name: TouchThreadActivity :exec
+UPDATE thread
+SET last_activity_at = now()
+WHERE id = $1;
+
+-- name: IncrementThreadReply :exec
+-- New-semantics: callers invoke this only for human/agent messages,
+-- NOT system messages. System-message handlers call TouchThreadActivity
+-- instead. Handler migration lands in Task 4.
+UPDATE thread
+SET reply_count      = reply_count + 1,
+    last_reply_at    = now(),
+    last_activity_at = now()
+WHERE id = $1;
