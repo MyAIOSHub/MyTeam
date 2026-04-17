@@ -2,11 +2,14 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -279,18 +282,52 @@ type UpdateAgentRequest struct {
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.
-// Only the agent owner or workspace owner/admin can manage any agent,
-// regardless of whether it is public or private.
+// Enforces PRD §8.9: only the Agent Owner (personal agent) or a workspace
+// admin/owner may mutate agent state. Implemented with auth.Guards so the
+// permission policy is centralized and testable.
+//
+// System agents (owner_id = NULL) have no Agent Owner — RequireAgentOwner
+// returns a non-forbidden error there; we treat that as "fall through to
+// admin check" rather than a 500.
 func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) bool {
-	wsID := uuidToString(agent.WorkspaceID)
-	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
+	userID, ok := requireUserID(w, r)
 	if !ok {
 		return false
 	}
-	isAdmin := roleAllowed(member.Role, "owner", "admin")
-	isAgentOwner := uuidToString(agent.OwnerID) == requestUserID(r)
-	if !isAdmin && !isAgentOwner {
-		writeError(w, http.StatusForbidden, "only the agent owner can manage this agent")
+
+	agentUUID, err := uuid.Parse(uuidToString(agent.ID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "invalid agent id")
+		return false
+	}
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return false
+	}
+	workspaceUUID, err := uuid.Parse(uuidToString(agent.WorkspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "invalid workspace id")
+		return false
+	}
+
+	// Agent owner is always allowed. Any error (forbidden, no rows, no
+	// owner) falls through to the admin check; we don't surface the
+	// underlying error because the second guard will produce the final
+	// verdict.
+	if err := h.Guards.RequireAgentOwner(r.Context(), agentUUID, userUUID); err == nil {
+		return true
+	}
+
+	// Not the agent owner; allow workspace admin/owner.
+	if err := h.Guards.RequireAdminOrAbove(r.Context(), workspaceUUID, userUUID); err != nil {
+		if errors.Is(err, auth.ErrForbidden) {
+			writeError(w, http.StatusForbidden, "only the agent owner or a workspace admin can manage this agent")
+			return false
+		}
+		// Member lookup failed (e.g. no member row). Treat the same as
+		// forbidden: the request originator is not part of this workspace.
+		writeError(w, http.StatusForbidden, "only the agent owner or a workspace admin can manage this agent")
 		return false
 	}
 	return true

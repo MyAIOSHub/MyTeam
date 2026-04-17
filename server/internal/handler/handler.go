@@ -43,6 +43,7 @@ type Handler struct {
 	UpdateStore  *UpdateStore
 	Storage          *storage.S3Storage
 	CFSigner         *auth.CloudFrontSigner
+	Guards            auth.Guards
 	AutoReplyService  *service.AutoReplyService
 	PlanGenerator     *service.PlanGeneratorService
 	Scheduler         *service.SchedulerService
@@ -67,6 +68,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		UpdateStore:  NewUpdateStore(),
 		Storage:      s3,
 		CFSigner:     cfSigner,
+		Guards:       auth.NewGuards(queries),
 	}
 }
 
