@@ -1,7 +1,7 @@
 // Package provider declares the static set of execution providers the
-// platform knows about. Adding a provider requires a code change because
-// every provider needs a corresponding Backend implementation and Daemon
-// detection logic.
+// platform knows about. Adding a provider requires a code change: local
+// CLI providers need a corresponding Backend in pkg/agent and Daemon
+// detection logic; cloud providers are wired through CloudExecutorService.
 package provider
 
 import "fmt"
