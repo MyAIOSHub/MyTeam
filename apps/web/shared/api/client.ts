@@ -49,6 +49,7 @@ import type {
   AgentProfile,
   RemoteSession,
   FileVersion,
+  Provider,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
@@ -345,6 +346,11 @@ export class ApiClient {
 
   async getPageAgent(scope: string): Promise<Agent> {
     return this.fetch(`/api/page-agents/${scope}`);
+  }
+
+  // Providers
+  async listProviders(): Promise<Provider[]> {
+    return this.fetch<Provider[]>("/api/providers");
   }
 
   async listRuntimes(params?: { workspace_id?: string }): Promise<AgentRuntime[]> {

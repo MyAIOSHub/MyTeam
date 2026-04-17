@@ -75,3 +75,4 @@ export type {
   BrowserTab,
   BrowserContext,
 } from "./workspace-substrate";
+export type { Provider, ProviderKind } from "./provider";
