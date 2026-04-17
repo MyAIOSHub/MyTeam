@@ -726,7 +726,8 @@ export class ApiClient {
 
   // Threads
   async listThreads(channelId: string): Promise<Thread[]> {
-    return this.fetch(`/api/channels/${channelId}/threads`);
+    const resp = await this.fetch<{ threads: Thread[] }>(`/api/channels/${channelId}/threads`);
+    return resp.threads ?? [];
   }
 
   async createThread(channelID: string, body: CreateThreadRequest): Promise<Thread> {
@@ -749,13 +750,16 @@ export class ApiClient {
     if (params?.limit != null) query.set("limit", String(params.limit));
     if (params?.offset != null) query.set("offset", String(params.offset));
     const qs = query.toString();
-    return this.fetch<Message[]>(`/api/threads/${threadID}/messages${qs ? "?" + qs : ""}`);
+    const resp = await this.fetch<{ messages: Message[] }>(
+      `/api/threads/${threadID}/messages${qs ? "?" + qs : ""}`,
+    );
+    return resp.messages ?? [];
   }
 
-  async sendThreadMessage(threadId: string, content: string) {
-    return this.fetch<any>('/api/messages', {
+  async sendThreadMessage(threadId: string, content: string): Promise<Message> {
+    return this.fetch<Message>(`/api/threads/${threadId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ thread_id: threadId, content }),
+      body: JSON.stringify({ content }),
     });
   }
 
@@ -767,7 +771,10 @@ export class ApiClient {
   }
 
   async listThreadContextItems(threadID: string): Promise<ThreadContextItem[]> {
-    return this.fetch<ThreadContextItem[]>(`/api/threads/${threadID}/context-items`);
+    const resp = await this.fetch<{ items: ThreadContextItem[] }>(
+      `/api/threads/${threadID}/context-items`,
+    );
+    return resp.items ?? [];
   }
 
   async createThreadContextItem(
