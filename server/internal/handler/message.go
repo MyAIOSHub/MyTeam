@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -88,6 +89,34 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		threadID = h.resolveOrCreateThread(r.Context(), *req.ParentMessageID)
 	}
 
+	// Session compatibility (Plan 3 / Phase 2): legacy callers still post
+	// with session_id. Translate to (channel_id, thread_id) via
+	// session_migration_map so the row speaks both schemas. session_id
+	// stays populated; Phase 6 will drop the column entirely.
+	channelUUID := ptrToUUID(req.ChannelID)
+	sessionUUID := ptrToUUID(req.SessionID)
+	if sessionUUID.Valid {
+		mappedChannel, mappedThread, resolveErr := h.resolveSessionRouting(r.Context(), sessionUUID)
+		switch {
+		case resolveErr == nil:
+			if !channelUUID.Valid {
+				channelUUID = mappedChannel
+			}
+			if !threadID.Valid {
+				threadID = mappedThread
+			}
+		case errors.Is(resolveErr, errSessionNotMigrated):
+			// Task 7's bulk backfill is still pending — keep only
+			// session_id populated and let the write proceed.
+			slog.Debug("session not yet migrated, writing session_id only",
+				"session_id", uuidToString(sessionUUID))
+		default:
+			slog.Warn("resolveSessionRouting failed",
+				"error", resolveErr,
+				"session_id", uuidToString(sessionUUID))
+		}
+	}
+
 	// Use parent_message_id as ParentID if the legacy ParentID is not set.
 	parentID := ptrToUUID(req.ParentID)
 	if !parentID.Valid && req.ParentMessageID != nil {
@@ -98,10 +127,10 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID:     parseUUID(workspaceID),
 		SenderID:        parseUUID(senderID),
 		SenderType:      senderType,
-		ChannelID:       ptrToUUID(req.ChannelID),
+		ChannelID:       channelUUID,
 		RecipientID:     ptrToUUID(req.RecipientID),
 		RecipientType:   ptrToText(req.RecipientType),
-		SessionID:       ptrToUUID(req.SessionID),
+		SessionID:       sessionUUID,
 		Content:         req.Content,
 		ContentType:     contentType,
 		FileID:          ptrToUUID(req.FileID),
@@ -121,10 +150,11 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If we created/resolved a thread, increment its reply count.
-	if threadID.Valid {
-		h.incrementThreadReplyCount(r.Context(), threadID)
-	}
+	// If the message lives in a thread (directly via parent_message_id or
+	// indirectly via a legacy session_id mapping), bump counters using the
+	// PRD §4 semantics (member/agent -> reply_count + last_reply_at;
+	// system -> last_activity_at only).
+	h.incrementThreadCounters(r.Context(), threadID, senderType)
 
 	// Dedup check for WS broadcast
 	actorType := senderType

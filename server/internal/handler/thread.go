@@ -231,18 +231,9 @@ func (h *Handler) PostThreadMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Thread counters: increment reply_count + last_reply_at for member/agent
-	// senders (per PRD §4 reply_count semantics fix); just touch last_activity_at
-	// for system senders.
-	if actorType == "member" || actorType == "agent" {
-		if err := h.Queries.IncrementThreadReply(r.Context(), thread.ID); err != nil {
-			slog.Warn("increment thread reply failed", "error", err, "thread_id", threadID)
-		}
-	} else {
-		if err := h.Queries.TouchThreadActivity(r.Context(), thread.ID); err != nil {
-			slog.Warn("touch thread activity failed", "error", err, "thread_id", threadID)
-		}
-	}
+	// Thread counters: PRD §4 semantics — member/agent bumps reply_count +
+	// last_reply_at; system messages only touch last_activity_at.
+	h.incrementThreadCounters(r.Context(), thread.ID, actorType)
 
 	if messageDedup.Add(uuidToString(msg.ID)) {
 		h.publish(protocol.EventMessageCreated, workspaceID, actorType, actorID, map[string]any{
@@ -499,13 +490,3 @@ func (h *Handler) upsertThread(ctx context.Context, threadID, channelID pgtype.U
 	return err
 }
 
-// incrementThreadReplyCount keeps existing message.CreateMessage callers
-// working. New thread handlers use IncrementThreadReply / TouchThreadActivity.
-func (h *Handler) incrementThreadReplyCount(ctx context.Context, threadID pgtype.UUID) {
-	if h.DB == nil {
-		return
-	}
-	if err := h.Queries.IncrementThreadReplyCount(ctx, threadID); err != nil {
-		slog.Warn("increment thread reply count failed", "thread_id", uuidToString(threadID), "error", err)
-	}
-}
