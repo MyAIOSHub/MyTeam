@@ -476,15 +476,17 @@ func (h *Handler) getThread(ctx context.Context, threadID string) (db.Thread, er
 }
 
 // upsertThread is retained for message.CreateMessage's resolveOrCreateThread.
-// Uses the legacy UpsertThread query (id == root message id).
-func (h *Handler) upsertThread(ctx context.Context, threadID, channelID pgtype.UUID) error {
+// Uses the legacy UpsertThread query (id == root message id). workspaceID is
+// required because migration 051 promotes thread.workspace_id to NOT NULL.
+func (h *Handler) upsertThread(ctx context.Context, threadID, channelID, workspaceID pgtype.UUID) error {
 	if h.DB == nil {
 		return nil
 	}
 	_, err := h.Queries.UpsertThread(ctx, db.UpsertThreadParams{
-		ID:        threadID,
-		ChannelID: channelID,
-		Title:     pgtype.Text{},
+		ID:          threadID,
+		ChannelID:   channelID,
+		WorkspaceID: workspaceID,
+		Title:       pgtype.Text{},
 	})
 	return err
 }

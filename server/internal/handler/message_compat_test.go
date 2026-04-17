@@ -2,6 +2,9 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -111,4 +114,106 @@ func TestIncrementThreadCounters_InvalidThread(t *testing.T) {
 	ctx := context.Background()
 	// Invalid pgtype.UUID (Valid=false) must be ignored.
 	testHandler.incrementThreadCounters(ctx, pgtype.UUID{}, "member")
+}
+
+// TestCreateMessage_WithParentMessage_PopulatesThreadID is the regression test
+// for the coupled bug where CreateMessage's sqlc INSERT was missing the
+// thread_id column and UpsertThread was missing workspace_id. Before the fix:
+//   - messages posted with parent_message_id had thread_id = NULL;
+//   - the first attempt to materialize a thread crashed because
+//     thread.workspace_id is NOT NULL (migration 051).
+//
+// After the fix: the thread is created with the correct workspace_id and the
+// reply message carries the resolved thread_id.
+func TestCreateMessage_WithParentMessage_PopulatesThreadID(t *testing.T) {
+	ctx := context.Background()
+	channelID := compatTestChannel(t, ctx, "compat-create-thread-id")
+
+	// Seed a parent message directly via CreateMessage (no parent_message_id,
+	// no thread) — this becomes the root of the soon-to-be thread.
+	parent, err := testHandler.Queries.CreateMessage(ctx, db.CreateMessageParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		SenderID:    parseUUID(testUserID),
+		SenderType:  "member",
+		ChannelID:   parseUUID(channelID),
+		Content:     "parent message",
+		ContentType: "text",
+		Type:        "user",
+	})
+	if err != nil {
+		t.Fatalf("create parent message: %v", err)
+	}
+	parentIDStr := uuidToString(parent.ID)
+
+	// POST /api/messages with parent_message_id set — should resolve/create
+	// a thread AND stamp thread_id on the new message.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/messages", map[string]any{
+		"channel_id":        channelID,
+		"content":           "reply message",
+		"parent_message_id": parentIDStr,
+	})
+	testHandler.CreateMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateMessage: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	replyIDStr, _ := resp["id"].(string)
+	if replyIDStr == "" {
+		t.Fatalf("response missing id: %+v", resp)
+	}
+
+	// Reload the message from the DB (the response map does not surface
+	// thread_id — we only trust the persisted row).
+	stored, err := testHandler.Queries.GetMessage(ctx, parseUUID(replyIDStr))
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if !stored.ThreadID.Valid {
+		t.Fatalf("stored message thread_id: expected non-null, got NULL")
+	}
+	if uuidToString(stored.ThreadID) != parentIDStr {
+		t.Fatalf("thread_id: expected %s (== parent_message_id), got %s",
+			parentIDStr, uuidToString(stored.ThreadID))
+	}
+
+	// Thread row must exist with the workspace_id populated (regression guard
+	// for the UpsertThread missing-workspace_id bug).
+	thread, err := testHandler.Queries.GetThread(ctx, parseUUID(parentIDStr))
+	if err != nil {
+		t.Fatalf("GetThread: %v", err)
+	}
+	if !thread.WorkspaceID.Valid {
+		t.Fatalf("thread.workspace_id: expected non-null, got NULL")
+	}
+	if uuidToString(thread.WorkspaceID) != testWorkspaceID {
+		t.Fatalf("thread.workspace_id: expected %s, got %s",
+			testWorkspaceID, uuidToString(thread.WorkspaceID))
+	}
+
+	// ListMessagesByThread must find the reply (the silent-bypass path that
+	// triggered bug #1's downstream effects).
+	threadMessages, err := testHandler.Queries.ListMessagesByThread(ctx, db.ListMessagesByThreadParams{
+		ThreadID: parseUUID(parentIDStr),
+		Limit:    10,
+		Offset:   0,
+	})
+	if err != nil {
+		t.Fatalf("ListMessagesByThread: %v", err)
+	}
+	found := false
+	for _, m := range threadMessages {
+		if uuidToString(m.ID) == replyIDStr {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("ListMessagesByThread did not return reply %s; got %d messages",
+			replyIDStr, len(threadMessages))
+	}
 }

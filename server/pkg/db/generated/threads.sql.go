@@ -380,8 +380,8 @@ func (q *Queries) UpdateThreadTitle(ctx context.Context, arg UpdateThreadTitlePa
 }
 
 const upsertThread = `-- name: UpsertThread :one
-INSERT INTO thread (id, channel_id, title, reply_count, last_reply_at, last_activity_at, created_at)
-VALUES ($1, $2, $3, 1, NOW(), NOW(), NOW())
+INSERT INTO thread (id, channel_id, workspace_id, title, reply_count, last_reply_at, last_activity_at, created_at)
+VALUES ($1, $2, $3, $4, 1, NOW(), NOW(), NOW())
 ON CONFLICT (id) DO UPDATE SET
     reply_count       = thread.reply_count + 1,
     last_reply_at     = NOW(),
@@ -390,13 +390,19 @@ RETURNING id, channel_id, title, reply_count, last_reply_at, created_at, workspa
 `
 
 type UpsertThreadParams struct {
-	ID        pgtype.UUID `json:"id"`
-	ChannelID pgtype.UUID `json:"channel_id"`
-	Title     pgtype.Text `json:"title"`
+	ID          pgtype.UUID `json:"id"`
+	ChannelID   pgtype.UUID `json:"channel_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Title       pgtype.Text `json:"title"`
 }
 
 func (q *Queries) UpsertThread(ctx context.Context, arg UpsertThreadParams) (Thread, error) {
-	row := q.db.QueryRow(ctx, upsertThread, arg.ID, arg.ChannelID, arg.Title)
+	row := q.db.QueryRow(ctx, upsertThread,
+		arg.ID,
+		arg.ChannelID,
+		arg.WorkspaceID,
+		arg.Title,
+	)
 	var i Thread
 	err := row.Scan(
 		&i.ID,

@@ -52,8 +52,8 @@ func (q *Queries) CountUnreadMessages(ctx context.Context, arg CountUnreadMessag
 }
 
 const createMessage = `-- name: CreateMessage :one
-INSERT INTO message (workspace_id, sender_id, sender_type, channel_id, recipient_id, recipient_type, content, content_type, file_id, file_name, file_size, file_content_type, metadata, parent_id, type)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+INSERT INTO message (workspace_id, sender_id, sender_type, channel_id, recipient_id, recipient_type, content, content_type, file_id, file_name, file_size, file_content_type, metadata, parent_id, type, thread_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 RETURNING id, workspace_id, sender_id, sender_type, channel_id, recipient_id, recipient_type, content, content_type, file_id, file_name, file_size, file_content_type, metadata, status, created_at, updated_at, parent_id, type, is_impersonated, reply_expected, thread_id, effective_actor_id, effective_actor_type, real_operator_id, real_operator_type
 `
 
@@ -73,6 +73,7 @@ type CreateMessageParams struct {
 	Metadata        []byte      `json:"metadata"`
 	ParentID        pgtype.UUID `json:"parent_id"`
 	Type            string      `json:"type"`
+	ThreadID        pgtype.UUID `json:"thread_id"`
 }
 
 func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error) {
@@ -92,6 +93,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 		arg.Metadata,
 		arg.ParentID,
 		arg.Type,
+		arg.ThreadID,
 	)
 	var i Message
 	err := row.Scan(

@@ -139,12 +139,12 @@ func (s *AutoReplyService) replyAsMentionedAgent(ctx context.Context, agentName 
 	// agent's runtime metadata, not the agent row).
 	cfg, err := loadAgentCloudLLMConfig(ctx, s.Queries, agent)
 	if err != nil {
-		s.postSystemNotification(ctx, agent, util.ParseUUID(channelID), util.ParseUUID(workspaceID),
+		s.postSystemNotification(ctx, agent, util.ParseUUID(channelID), trigger.ThreadID, util.ParseUUID(workspaceID),
 			"Agent configuration is invalid: "+redactKey(err.Error()))
 		return nil
 	}
 	if cfg.APIKey == "" {
-		s.postSystemNotification(ctx, agent, util.ParseUUID(channelID), util.ParseUUID(workspaceID),
+		s.postSystemNotification(ctx, agent, util.ParseUUID(channelID), trigger.ThreadID, util.ParseUUID(workspaceID),
 			"Agent is not configured: missing API key.")
 		return nil
 	}
@@ -187,21 +187,24 @@ func (s *AutoReplyService) replyAsMentionedAgent(ctx context.Context, agentName 
 	if err != nil {
 		msg := fmt.Sprintf("Agent reply failed: %s", redactKey(err.Error()))
 		slog.Warn("auto-reply runner failed", "agent", agentName, "error", err)
-		s.postSystemNotification(ctx, agent, util.ParseUUID(channelID), util.ParseUUID(workspaceID), msg)
+		s.postSystemNotification(ctx, agent, util.ParseUUID(channelID), trigger.ThreadID, util.ParseUUID(workspaceID), msg)
 		return nil
 	}
 	if reply == "" {
-		s.postSystemNotification(ctx, agent, util.ParseUUID(channelID), util.ParseUUID(workspaceID),
+		s.postSystemNotification(ctx, agent, util.ParseUUID(channelID), trigger.ThreadID, util.ParseUUID(workspaceID),
 			"Agent returned empty reply.")
 		return nil
 	}
 
-	// Insert agent's reply message.
+	// Insert agent's reply message. If the trigger lived inside a thread,
+	// the reply must be attached to that thread so ListMessagesByThread and
+	// MediationService anti-loop checks see it.
 	replyMsg, err := s.Queries.CreateMessage(ctx, db.CreateMessageParams{
 		WorkspaceID: util.ParseUUID(workspaceID),
 		SenderID:    agent.ID,
 		SenderType:  "agent",
 		ChannelID:   util.ParseUUID(channelID),
+		ThreadID:    trigger.ThreadID,
 		Content:     reply,
 		ContentType: "text",
 		Type:        "agent_reply",
@@ -220,14 +223,17 @@ func (s *AutoReplyService) replyAsMentionedAgent(ctx context.Context, agentName 
 	return nil
 }
 
-// postSystemNotification sends a visible message from the agent to explain failure.
-func (s *AutoReplyService) postSystemNotification(ctx context.Context, agent db.Agent, channelID, workspaceID pgtype.UUID, message string) {
+// postSystemNotification sends a visible message from the agent to explain
+// failure. If threadID is valid, the notification is attached to the same
+// thread as the triggering message so it threads cleanly in the UI.
+func (s *AutoReplyService) postSystemNotification(ctx context.Context, agent db.Agent, channelID, threadID, workspaceID pgtype.UUID, message string) {
 	meta, _ := json.Marshal(map[string]any{"system_notification": true})
 	msg, err := s.Queries.CreateMessage(ctx, db.CreateMessageParams{
 		WorkspaceID: workspaceID,
 		SenderID:    agent.ID,
 		SenderType:  "agent",
 		ChannelID:   channelID,
+		ThreadID:    threadID,
 		Content:     message,
 		ContentType: "text",
 		Type:        "system_notification",

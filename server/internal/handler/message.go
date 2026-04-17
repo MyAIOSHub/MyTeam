@@ -111,9 +111,7 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		Metadata:        req.Metadata,
 		ParentID:        parentID,
 		Type:            msgType,
-		// TODO: wire after sqlc generation — add these fields to CreateMessageParams:
-		// IsImpersonated: isImpersonated,
-		// ThreadID:       threadID,
+		ThreadID:        threadID,
 	})
 	if err != nil {
 		slog.Warn("create message failed", "error", err)
@@ -170,18 +168,19 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 // resolveOrCreateThread looks up or creates a thread for a parent message.
-// Thread ID equals the root message ID per the data model.
+// Thread ID equals the root message ID per the data model. Returns an invalid
+// pgtype.UUID on failure (caller treats that as "no thread context").
 func (h *Handler) resolveOrCreateThread(ctx context.Context, parentMessageID string) pgtype.UUID {
 	parentUUID := parseUUID(parentMessageID)
 
 	// Check if thread already exists for this parent message.
-	_, err := h.getThread(ctx, parentMessageID)
-	if err == nil {
+	if _, err := h.getThread(ctx, parentMessageID); err == nil {
 		// Thread exists.
 		return parentUUID
 	}
 
-	// Thread does not exist — look up the parent message to get its channel_id.
+	// Thread does not exist — look up the parent message to get its
+	// channel_id + workspace_id (both required by thread NOT NULL columns).
 	parentMsg, err := h.Queries.GetMessage(ctx, parentUUID)
 	if err != nil {
 		slog.Warn("resolve thread: parent message not found", "parent_message_id", parentMessageID, "error", err)
@@ -189,7 +188,7 @@ func (h *Handler) resolveOrCreateThread(ctx context.Context, parentMessageID str
 	}
 
 	// Create a new thread with id = parent_message_id.
-	if err := h.upsertThread(ctx, parentUUID, parentMsg.ChannelID); err != nil {
+	if err := h.upsertThread(ctx, parentUUID, parentMsg.ChannelID, parentMsg.WorkspaceID); err != nil {
 		slog.Warn("resolve thread: failed to create thread", "parent_message_id", parentMessageID, "error", err)
 		return pgtype.UUID{}
 	}

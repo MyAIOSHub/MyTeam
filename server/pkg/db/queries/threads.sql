@@ -1,6 +1,6 @@
 -- name: UpsertThread :one
-INSERT INTO thread (id, channel_id, title, reply_count, last_reply_at, last_activity_at, created_at)
-VALUES ($1, $2, $3, 1, NOW(), NOW(), NOW())
+INSERT INTO thread (id, channel_id, workspace_id, title, reply_count, last_reply_at, last_activity_at, created_at)
+VALUES (@id, @channel_id, @workspace_id, @title, 1, NOW(), NOW(), NOW())
 ON CONFLICT (id) DO UPDATE SET
     reply_count       = thread.reply_count + 1,
     last_reply_at     = NOW(),

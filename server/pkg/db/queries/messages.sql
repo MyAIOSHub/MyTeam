@@ -1,6 +1,6 @@
 -- name: CreateMessage :one
-INSERT INTO message (workspace_id, sender_id, sender_type, channel_id, recipient_id, recipient_type, content, content_type, file_id, file_name, file_size, file_content_type, metadata, parent_id, type)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+INSERT INTO message (workspace_id, sender_id, sender_type, channel_id, recipient_id, recipient_type, content, content_type, file_id, file_name, file_size, file_content_type, metadata, parent_id, type, thread_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, sqlc.narg('thread_id'))
 RETURNING *;
 
 -- name: GetMessage :one
