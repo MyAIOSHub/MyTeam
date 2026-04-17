@@ -31,8 +31,10 @@ DECLARE
   decision_item  JSONB;
   file_item      JSONB;
   snippet_item   JSONB;
+  snippets_jsonb JSONB;
   short_id       TEXT;
   title_slug     TEXT;
+  unmapped_key   TEXT;
 BEGIN
   FOR sess IN
     SELECT s.*
@@ -172,8 +174,15 @@ BEGIN
     END IF;
 
     -- 5d. code_snippets[] — language-tagged code, retention='ttl'.
-    IF jsonb_typeof(ctx->'code_snippets') = 'array' THEN
-      FOR snippet_item IN SELECT value FROM jsonb_array_elements(ctx->'code_snippets') AS arr(value) LOOP
+    -- Accept both snake_case (`code_snippets`, historical backend form) and
+    -- camelCase (`codeSnippets`, what the TS SDK / MCP server actually
+    -- serializes via packages/shared SessionContext). Before this COALESCE
+    -- any camelCase data was silently dropped.
+    -- Metadata preserves the full snippet JSON minus the extracted body (`code`),
+    -- so `language`, `description`, and any other fields survive decomposition.
+    snippets_jsonb := COALESCE(ctx->'code_snippets', ctx->'codeSnippets');
+    IF jsonb_typeof(snippets_jsonb) = 'array' THEN
+      FOR snippet_item IN SELECT value FROM jsonb_array_elements(snippets_jsonb) AS arr(value) LOOP
         INSERT INTO thread_context_item (
           workspace_id, thread_id,
           item_type, body, metadata,
@@ -182,7 +191,7 @@ BEGIN
           sess.workspace_id, new_thread_id,
           'code_snippet',
           snippet_item->>'code',
-          jsonb_build_object('language', snippet_item->>'language'),
+          snippet_item - 'code',
           'ttl', 'system', sess.created_at
         );
       END LOOP;
@@ -197,6 +206,23 @@ BEGIN
       SET title = ctx->>'topic'
       WHERE id = new_thread_id;
     END IF;
+
+    -- 5f. Observability: surface context keys we did NOT map to a
+    -- thread_context_item row. The TS SessionContext type is loose, so
+    -- keys like `tags`, `pinned`, `references`, etc. may appear in
+    -- production data. They are intentionally dropped (no target column),
+    -- but ops should see them so we can decide whether to extend the
+    -- mapping in a follow-up.
+    FOR unmapped_key IN
+      SELECT key FROM jsonb_each(ctx)
+      WHERE key NOT IN (
+        'topic', 'summary', 'decisions',
+        'files', 'code_snippets', 'codeSnippets'
+      )
+    LOOP
+      RAISE NOTICE 'migration 052: session % has unmapped context key "%" (dropped)',
+        sess.id, unmapped_key;
+    END LOOP;
 
     -- 6. Migration map.
     INSERT INTO session_migration_map (session_id, channel_id, thread_id, migrated_at)
