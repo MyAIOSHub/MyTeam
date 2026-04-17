@@ -27,10 +27,10 @@ var PageAgentDefs = []PageAgentDef{
 		Instructions: "You are the Account page system agent. You manage identity cards and agent profiles. Generate and update identity descriptions based on agent history, skills, and workspace context.",
 	},
 	{
-		Scope:        "session",
-		Name:         "Session Agent",
+		Scope:        "conversation",
+		Name:         "Conversation Agent",
 		Description:  "Manages auto-reply routing, ensures every message gets a reply, handles @mentions",
-		Instructions: "You are the Session page system agent. You ensure every message in conversations gets an appropriate reply. When agents are @mentioned, enforce timely responses. Route messages to the most relevant agent.",
+		Instructions: "You are the Conversation page system agent. You ensure every message in conversations gets an appropriate reply. When agents are @mentioned, enforce timely responses. Route messages to the most relevant agent.",
 	},
 	{
 		Scope:        "project",

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -40,72 +39,6 @@ func compatTestThread(t *testing.T, ctx context.Context, channelID string) strin
 		t.Fatalf("compatTestThread: CreateThread failed: %v", err)
 	}
 	return uuidToString(thread.ID)
-}
-
-// compatTestSession inserts a legacy session row so it can be referenced by
-// session_migration_map rows. Cleans up on test completion.
-func compatTestSession(t *testing.T, ctx context.Context, title string) string {
-	t.Helper()
-	var sessionID string
-	err := testPool.QueryRow(ctx, `
-		INSERT INTO session (workspace_id, title, creator_id, creator_type, status)
-		VALUES ($1, $2, $3, 'member', 'active')
-		RETURNING id`,
-		testWorkspaceID, title, testUserID,
-	).Scan(&sessionID)
-	if err != nil {
-		t.Fatalf("compatTestSession: insert session failed: %v", err)
-	}
-	t.Cleanup(func() {
-		ctx := context.Background()
-		testPool.Exec(ctx, `DELETE FROM session_migration_map WHERE session_id = $1`, sessionID)
-		testPool.Exec(ctx, `DELETE FROM session WHERE id = $1`, sessionID)
-	})
-	return sessionID
-}
-
-// TestResolveSessionRouting_FromMap pre-populates session_migration_map and
-// verifies the resolver returns the mapped (channel_id, thread_id).
-func TestResolveSessionRouting_FromMap(t *testing.T) {
-	ctx := context.Background()
-
-	channelID := compatTestChannel(t, ctx, "compat-resolve-from-map")
-	threadID := compatTestThread(t, ctx, channelID)
-	sessionID := compatTestSession(t, ctx, "compat-from-map")
-
-	if err := testHandler.Queries.InsertSessionMigrationMap(ctx, db.InsertSessionMigrationMapParams{
-		SessionID: parseUUID(sessionID),
-		ChannelID: parseUUID(channelID),
-		ThreadID:  parseUUID(threadID),
-	}); err != nil {
-		t.Fatalf("InsertSessionMigrationMap: %v", err)
-	}
-
-	gotChannel, gotThread, err := testHandler.resolveSessionRouting(ctx, parseUUID(sessionID))
-	if err != nil {
-		t.Fatalf("resolveSessionRouting: unexpected error: %v", err)
-	}
-	if uuidToString(gotChannel) != channelID {
-		t.Fatalf("resolveSessionRouting: channel_id = %q, want %q", uuidToString(gotChannel), channelID)
-	}
-	if uuidToString(gotThread) != threadID {
-		t.Fatalf("resolveSessionRouting: thread_id = %q, want %q", uuidToString(gotThread), threadID)
-	}
-}
-
-// TestResolveSessionRouting_NotMigrated verifies that missing map rows return
-// the sentinel errSessionNotMigrated (the backfill-pending signal).
-func TestResolveSessionRouting_NotMigrated(t *testing.T) {
-	ctx := context.Background()
-	sessionID := compatTestSession(t, ctx, "compat-not-migrated")
-
-	_, _, err := testHandler.resolveSessionRouting(ctx, parseUUID(sessionID))
-	if err == nil {
-		t.Fatalf("resolveSessionRouting: expected error for unmapped session, got nil")
-	}
-	if !errors.Is(err, errSessionNotMigrated) {
-		t.Fatalf("resolveSessionRouting: expected errSessionNotMigrated, got %v", err)
-	}
 }
 
 // TestIncrementThreadCounters_Member verifies that a "member" sender bumps

@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -24,7 +23,6 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		ChannelID       *string         `json:"channel_id,omitempty"`
 		RecipientID     *string         `json:"recipient_id,omitempty"`
 		RecipientType   *string         `json:"recipient_type,omitempty"`
-		SessionID       *string         `json:"session_id,omitempty"`
 		Content         string          `json:"content"`
 		ContentType     string          `json:"content_type,omitempty"`
 		FileID          *string         `json:"file_id,omitempty"`
@@ -89,33 +87,7 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		threadID = h.resolveOrCreateThread(r.Context(), *req.ParentMessageID)
 	}
 
-	// Session compatibility (Plan 3 / Phase 2): legacy callers still post
-	// with session_id. Translate to (channel_id, thread_id) via
-	// session_migration_map so the row speaks both schemas. session_id
-	// stays populated; Phase 6 will drop the column entirely.
 	channelUUID := ptrToUUID(req.ChannelID)
-	sessionUUID := ptrToUUID(req.SessionID)
-	if sessionUUID.Valid {
-		mappedChannel, mappedThread, resolveErr := h.resolveSessionRouting(r.Context(), sessionUUID)
-		switch {
-		case resolveErr == nil:
-			if !channelUUID.Valid {
-				channelUUID = mappedChannel
-			}
-			if !threadID.Valid {
-				threadID = mappedThread
-			}
-		case errors.Is(resolveErr, errSessionNotMigrated):
-			// Task 7's bulk backfill is still pending — keep only
-			// session_id populated and let the write proceed.
-			slog.Debug("session not yet migrated, writing session_id only",
-				"session_id", uuidToString(sessionUUID))
-		default:
-			slog.Warn("resolveSessionRouting failed",
-				"error", resolveErr,
-				"session_id", uuidToString(sessionUUID))
-		}
-	}
 
 	// Use parent_message_id as ParentID if the legacy ParentID is not set.
 	parentID := ptrToUUID(req.ParentID)
@@ -130,7 +102,6 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		ChannelID:       channelUUID,
 		RecipientID:     ptrToUUID(req.RecipientID),
 		RecipientType:   ptrToText(req.RecipientType),
-		SessionID:       sessionUUID,
 		Content:         req.Content,
 		ContentType:     contentType,
 		FileID:          ptrToUUID(req.FileID),
@@ -150,10 +121,9 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If the message lives in a thread (directly via parent_message_id or
-	// indirectly via a legacy session_id mapping), bump counters using the
-	// PRD §4 semantics (member/agent -> reply_count + last_reply_at;
-	// system -> last_activity_at only).
+	// If the message lives in a thread (via parent_message_id), bump
+	// counters using the PRD §4 semantics (member/agent -> reply_count +
+	// last_reply_at; system -> last_activity_at only).
 	h.incrementThreadCounters(r.Context(), threadID, senderType)
 
 	// Dedup check for WS broadcast
@@ -227,12 +197,11 @@ func (h *Handler) resolveOrCreateThread(ctx context.Context, parentMessageID str
 	return parentUUID
 }
 
-// GET /api/messages?channel_id=X or recipient_id=X or session_id=X
+// GET /api/messages?channel_id=X or recipient_id=X
 func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	workspaceID := resolveWorkspaceID(r)
 	channelID := r.URL.Query().Get("channel_id")
 	recipientID := r.URL.Query().Get("recipient_id")
-	sessionID := r.URL.Query().Get("session_id")
 	limit := queryInt(r, "limit", 50)
 	offset := queryInt(r, "offset", 0)
 
@@ -242,12 +211,6 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	if channelID != "" {
 		messages, err = h.Queries.ListChannelMessages(r.Context(), db.ListChannelMessagesParams{
 			ChannelID: parseUUID(channelID),
-			Limit:     int32(limit),
-			Offset:    int32(offset),
-		})
-	} else if sessionID != "" {
-		messages, err = h.Queries.ListSessionMessages(r.Context(), db.ListSessionMessagesParams{
-			SessionID: parseUUID(sessionID),
 			Limit:     int32(limit),
 			Offset:    int32(offset),
 		})
@@ -266,7 +229,7 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 			Offset:        int32(offset),
 		})
 	} else {
-		writeError(w, http.StatusBadRequest, "specify channel_id, recipient_id, or session_id")
+		writeError(w, http.StatusBadRequest, "specify channel_id or recipient_id")
 		return
 	}
 
@@ -451,7 +414,6 @@ func messageToResponse(m db.Message) map[string]any {
 		"channel_id":     uuidToPtr(m.ChannelID),
 		"recipient_id":   uuidToPtr(m.RecipientID),
 		"recipient_type": textToPtr(m.RecipientType),
-		"session_id":     uuidToPtr(m.SessionID),
 		"content":        m.Content,
 		"content_type":   m.ContentType,
 		"file_id":        uuidToPtr(m.FileID),
@@ -483,7 +445,6 @@ func ptrToInt8(n *int64) pgtype.Int8 {
 func (h *Handler) SendTypingIndicator(w http.ResponseWriter, r *http.Request) {
 	type Req struct {
 		ChannelID string `json:"channel_id"`
-		SessionID string `json:"session_id"`
 		IsTyping  bool   `json:"is_typing"`
 	}
 	var req Req
@@ -497,7 +458,6 @@ func (h *Handler) SendTypingIndicator(w http.ResponseWriter, r *http.Request) {
 
 	h.publish("typing", workspaceID, "member", userID, map[string]any{
 		"channel_id": req.ChannelID,
-		"session_id": req.SessionID,
 		"is_typing":  req.IsTyping,
 		"sender_id":  userID,
 	})

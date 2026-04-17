@@ -377,7 +377,6 @@ type Message struct {
 	ChannelID          pgtype.UUID        `json:"channel_id"`
 	RecipientID        pgtype.UUID        `json:"recipient_id"`
 	RecipientType      pgtype.Text        `json:"recipient_type"`
-	SessionID          pgtype.UUID        `json:"session_id"`
 	Content            string             `json:"content"`
 	ContentType        string             `json:"content_type"`
 	FileID             pgtype.UUID        `json:"file_id"`
@@ -526,34 +525,11 @@ type RuntimeUsage struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
-type Session struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Title       string             `json:"title"`
-	CreatorID   pgtype.UUID        `json:"creator_id"`
-	CreatorType string             `json:"creator_type"`
-	Status      string             `json:"status"`
-	MaxTurns    int32              `json:"max_turns"`
-	CurrentTurn int32              `json:"current_turn"`
-	Context     []byte             `json:"context"`
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-}
-
 type SessionMigrationMap struct {
 	SessionID  pgtype.UUID        `json:"session_id"`
 	ChannelID  pgtype.UUID        `json:"channel_id"`
 	ThreadID   pgtype.UUID        `json:"thread_id"`
 	MigratedAt pgtype.Timestamptz `json:"migrated_at"`
-}
-
-type SessionParticipant struct {
-	SessionID       pgtype.UUID        `json:"session_id"`
-	ParticipantID   pgtype.UUID        `json:"participant_id"`
-	ParticipantType string             `json:"participant_type"`
-	Role            string             `json:"role"`
-	JoinedAt        pgtype.Timestamptz `json:"joined_at"`
 }
 
 type Skill struct {

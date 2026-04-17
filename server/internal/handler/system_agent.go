@@ -146,7 +146,7 @@ func (h *Handler) GetPageAgent(w http.ResponseWriter, r *http.Request) {
 
 func isValidScope(s string) bool {
 	switch s {
-	case "account", "session", "project", "file":
+	case "account", "conversation", "project", "file":
 		return true
 	}
 	return false

@@ -151,7 +151,7 @@ func (h *Handler) ListThreadMessages(w http.ResponseWriter, r *http.Request) {
 
 // PostThreadMessage - POST /api/threads/{threadID}/messages
 // Posts a new message in the thread. Sets thread_id + channel_id from the
-// thread's stored values; session_id is left NULL (no longer used).
+// thread's stored values.
 func (h *Handler) PostThreadMessage(w http.ResponseWriter, r *http.Request) {
 	threadID := chi.URLParam(r, "threadID")
 	userID, ok := requireUserID(w, r)
@@ -212,7 +212,6 @@ func (h *Handler) PostThreadMessage(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID:        parseUUID(workspaceID),
 		ChannelID:          thread.ChannelID,
 		ThreadID:           thread.ID,
-		SessionID:          pgtype.UUID{},
 		SenderID:           parseUUID(actorID),
 		SenderType:         actorType,
 		Content:            req.Content,
