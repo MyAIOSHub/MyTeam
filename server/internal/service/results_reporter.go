@@ -1,9 +1,10 @@
-// TODO(plan5-c3): results reporter will be rewritten to summarise Task /
-// Execution outcomes in Batch C3. Migration 059 dropped the workflow_step
-// table this service used to read per-step results from, so the per-step
-// breakdown has been temporarily removed. Run-level summary, channel
-// posting, and inbox notifications still operate so completed runs surface
-// to participants.
+// Package service: results_reporter.go — listens to run completion events,
+// composes a summary by walking the run's Executions, and delivers the
+// summary to the project's channel + each member's inbox.
+//
+// Per-task data is read from the execution table (one row per Task
+// attempt). The per-task breakdown lists task_id, status, and attempt so
+// participants can see which tasks completed and which retried/failed.
 
 package service
 
@@ -94,9 +95,9 @@ func (s *ResultsReporterService) handleRunCompleted(e events.Event) {
 
 // reportRunCompletion composes and delivers the run summary.
 //
-// TODO(plan5-c3): per-step results were previously read from workflow_step
-// (now dropped). Once Tasks/Executions are wired this should iterate the
-// run's executions and surface per-task status + artifacts.
+// The summary lists per-task execution rows (latest attempt only when
+// multiple are present, since ListExecutionsByRun orders by created_at
+// DESC and we deduplicate by task_id).
 func (s *ResultsReporterService) reportRunCompletion(ctx context.Context, workspaceID, runID string) {
 	// Step 1: Get the project run.
 	run, err := s.Queries.GetProjectRun(ctx, util.ParseUUID(runID))
@@ -106,9 +107,14 @@ func (s *ResultsReporterService) reportRunCompletion(ctx context.Context, worksp
 	}
 	projectID := util.UUIDToString(run.ProjectID)
 
-	// Step 2: per-step results temporarily unavailable (workflow_step
-	// dropped). Compose a run-level summary only.
-	summary := s.composeSummary(runID)
+	// Step 2: pull per-task execution rows for the run and synthesize a
+	// summary block. Failures here are non-fatal — the run-level header
+	// still gets posted.
+	executions, exErr := s.Queries.ListExecutionsByRun(ctx, util.ParseUUID(runID))
+	if exErr != nil {
+		slog.Warn("results reporter: list executions failed", "run_id", runID, "error", exErr)
+	}
+	summary := s.composeSummary(runID, executions)
 
 	slog.Info("results reporter: summary composed",
 		"run_id", runID,
@@ -148,16 +154,28 @@ func (s *ResultsReporterService) reportRunCompletion(ctx context.Context, worksp
 	})
 }
 
-// composeSummary builds a run-level summary string.
-//
-// TODO(plan5-c3): bring back the per-step breakdown using the new
-// Task/Execution tables.
-func (s *ResultsReporterService) composeSummary(runID string) string {
+// composeSummary builds the run summary. The per-task block is
+// deduplicated by task_id, keeping the latest attempt (executions arrive
+// newest-first from ListExecutionsByRun).
+func (s *ResultsReporterService) composeSummary(runID string, executions []db.Execution) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("## Run Completed: %s\n\n", runID))
 	sb.WriteString(fmt.Sprintf("**Completed at:** %s\n\n", time.Now().UTC().Format(time.RFC3339)))
-	sb.WriteString("Per-step results are temporarily unavailable while the workflow surface is migrated to Tasks. ")
-	sb.WriteString("Subscribe to the project's task feed for detailed status.\n")
+	if len(executions) == 0 {
+		sb.WriteString("No execution records were produced for this run.\n")
+		return sb.String()
+	}
+
+	sb.WriteString("### Tasks\n\n")
+	seen := make(map[[16]byte]bool, len(executions))
+	for _, e := range executions {
+		if !e.TaskID.Valid || seen[e.TaskID.Bytes] {
+			continue
+		}
+		seen[e.TaskID.Bytes] = true
+		sb.WriteString(fmt.Sprintf("- task=%s status=%s attempt=%d\n",
+			util.UUIDToString(e.TaskID), e.Status, e.Attempt))
+	}
 	return sb.String()
 }
 

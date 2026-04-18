@@ -58,8 +58,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	h.AutoReplyService = service.NewAutoReplyService(queries, hub, agent_runner.NewRunner())
 	h.PlanGenerator = service.NewPlanGeneratorService(queries)
 	h.IdentityGenerator = service.NewIdentityGeneratorService(queries)
-	h.Scheduler = service.NewSchedulerService(queries, hub)
-	h.Scheduler.Bus = bus
+	// Scheduler / Slots / Artifacts / Reviews / Quota are constructed inside
+	// handler.New so route handlers and lifecycle services share the same
+	// instances. See internal/handler/handler.go.
 
 	// Identity generator + scheduler
 	identityGen := service.NewIdentityGeneratorService(queries)
