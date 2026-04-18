@@ -80,9 +80,10 @@ func (h *Handler) UpdateIdentityCard(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r)
 
 	// Log activity
-	h.publish("activity:identity_card_updated", workspaceID, "member", userID, map[string]any{
-		"agent_id":      agentID,
-		"identity_card": body,
+	h.publish("agent:identity_card_updated", workspaceID, "member", userID, map[string]any{
+		"agent_id":       agentID,
+		"identity_card":  body,
+		"updated_fields": body,
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{

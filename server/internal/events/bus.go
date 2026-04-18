@@ -7,7 +7,7 @@ import (
 
 // Event represents a domain event published by handlers or services.
 type Event struct {
-	Type        string // e.g. "issue:created", "inbox:new"
+	Type        string // e.g. "issue:created", "inbox:item_created"
 	WorkspaceID string // routes to correct Hub room
 	ActorType   string // "member", "agent", or "system"
 	ActorID     string

@@ -592,7 +592,7 @@ func (h *Handler) ForkProject(w http.ResponseWriter, r *http.Request) {
 	resp := ProjectVersionResponse{
 		ID:            "", // TODO: from created version
 		ProjectID:     projectID,
-		VersionNumber: 0,  // TODO: from created version
+		VersionNumber: 0, // TODO: from created version
 		BranchName:    &req.BranchName,
 		ForkReason:    &req.ForkReason,
 		VersionStatus: "active",
@@ -718,6 +718,9 @@ func (h *Handler) RejectPlan(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventPlanRejected, workspaceID, "member", userID, map[string]any{
 		"project_id": projectID,
 		"plan_id":    uuidToString(plan.ID),
+		"from":       plan.ApprovalStatus,
+		"to":         "rejected",
+		"actor_id":   userID,
 		"reason":     req.Reason,
 	})
 

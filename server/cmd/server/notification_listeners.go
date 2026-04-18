@@ -18,7 +18,6 @@ type mention struct {
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
 
-
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
 	"backlog":     "Backlog",
@@ -68,7 +67,7 @@ func parseMentions(content string) []mention {
 
 // notifySubscribers queries the subscriber table for an issue, excludes the
 // actor and any extra IDs, and creates inbox items for each remaining member
-// subscriber. Publishes an inbox:new event for each notification.
+// subscriber. Publishes an inbox:item_created event for each notification.
 func notifySubscribers(
 	ctx context.Context,
 	queries *db.Queries,
@@ -141,7 +140,7 @@ func notifySubscribers(
 }
 
 // notifyDirect creates an inbox item for a specific recipient. Skips if the
-// recipient is the actor. Publishes an inbox:new event on success.
+// recipient is the actor. Publishes an inbox:item_created event on success.
 func notifyDirect(
 	ctx context.Context,
 	queries *db.Queries,

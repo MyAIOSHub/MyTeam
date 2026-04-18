@@ -34,7 +34,7 @@ func (s *NotificationService) SubscribeToEvents(bus *events.Bus) {
 	})
 
 	// Agent status changes
-	bus.Subscribe("agent:impersonation_started", func(e events.Event) {
+	bus.Subscribe("impersonation:started", func(e events.Event) {
 		slog.Info("impersonation started", "payload", e.Payload)
 	})
 }

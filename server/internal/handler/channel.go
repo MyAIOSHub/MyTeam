@@ -121,7 +121,7 @@ func (h *Handler) JoinChannel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workspaceID := resolveWorkspaceID(r)
-	h.publish("channel:member_joined", workspaceID, "member", userID, map[string]any{
+	h.publish("channel:member_added", workspaceID, "member", userID, map[string]any{
 		"channel_id": channelID,
 		"member_id":  userID,
 	})
@@ -149,7 +149,7 @@ func (h *Handler) LeaveChannel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workspaceID := resolveWorkspaceID(r)
-	h.publish("channel:member_left", workspaceID, "member", userID, map[string]any{
+	h.publish("channel:member_removed", workspaceID, "member", userID, map[string]any{
 		"channel_id": channelID,
 		"member_id":  userID,
 	})

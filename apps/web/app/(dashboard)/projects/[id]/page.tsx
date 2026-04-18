@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { useProjectStore } from "@/features/projects";
 import { useWorkspaceStore } from "@/features/workspace";
-import { useWorkflowStore } from "@/features/workflow/store";
 import { useIssueStore } from "@/features/issues/store";
 import { useIssueViewStore, initFilterWorkspaceSync } from "@/features/issues/stores/view-store";
 import { useIssuesScopeStore } from "@/features/issues/stores/issues-scope-store";
@@ -50,8 +49,8 @@ import type {
   PlanStep,
   Agent,
   IssueStatus,
+  Task,
 } from "@/shared/types";
-import type { WorkflowStep } from "@/shared/types/workflow";
 import type { Message } from "@/shared/types/messaging";
 
 const STATUS_BADGE: Record<ProjectStatus, string> = {
@@ -125,12 +124,11 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
 
   // Execution polling
   const execPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([]);
+  const [executionTasks, setExecutionTasks] = useState<Task[]>([]);
   const [startingExecution, setStartingExecution] = useState(false);
 
-  // Agents for replacement dropdown
+  // Agents for execution task display
   const agents = useWorkspaceStore((s) => s.agents) as Agent[];
-  const { retryStep, replaceStepAgent } = useWorkflowStore();
 
   // Issues state for tasks/board tabs
   const allIssues = useIssueStore((s) => s.issues);
@@ -256,22 +254,19 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
     };
   }, [currentProject?.channel_id]);
 
-  // Fetch workflow steps when project has a plan / active run
-  const fetchWorkflowSteps = useCallback(async () => {
-    if (!currentProject?.plan) return;
+  // Fetch execution tasks when project has a plan / active run
+  const fetchExecutionTasks = useCallback(async () => {
+    if (!currentProject?.plan?.id) {
+      setExecutionTasks([]);
+      return;
+    }
     try {
-      const res = await api.listWorkflows(200);
-      const wf = (res.workflows as any[]).find(
-        (w: any) => w.plan_id === currentProject.plan!.id
-      );
-      if (wf?.id) {
-        const stepsRes = await api.getWorkflowSteps(wf.id);
-        setWorkflowSteps(stepsRes.steps as WorkflowStep[]);
-      }
+      const tasks = await api.listTasksByPlan(currentProject.plan.id);
+      setExecutionTasks(tasks);
     } catch {
       // silently fail
     }
-  }, [currentProject?.plan]);
+  }, [currentProject?.plan?.id]);
 
   // Poll execution status
   useEffect(() => {
@@ -287,14 +282,14 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
         await Promise.all([
           fetchRuns(id),
           fetchProject(id),
-          fetchWorkflowSteps(),
+          fetchExecutionTasks(),
         ]);
       } catch {
         // silently fail
       }
     }
 
-    fetchWorkflowSteps();
+    fetchExecutionTasks();
 
     execPollRef.current = setInterval(pollExecution, 3000);
     return () => {
@@ -305,14 +300,14 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
     id,
     fetchRuns,
     fetchProject,
-    fetchWorkflowSteps,
+    fetchExecutionTasks,
   ]);
 
   useEffect(() => {
     if (currentProject?.active_run) {
-      fetchWorkflowSteps();
+      fetchExecutionTasks();
     }
-  }, [currentProject?.active_run, fetchWorkflowSteps]);
+  }, [currentProject?.active_run, fetchExecutionTasks]);
 
   async function handleTitleSave() {
     if (!titleValue.trim() || !id) return;
@@ -353,18 +348,6 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
     } finally {
       setStartingExecution(false);
     }
-  }
-
-  function handleRetryStep(stepId: string) {
-    const wfId = workflowSteps[0]?.workflow_id;
-    if (!wfId) return;
-    retryStep(wfId, stepId);
-  }
-
-  function handleReplaceAgent(stepId: string, agentId: string) {
-    const wfId = workflowSteps[0]?.workflow_id;
-    if (!wfId) return;
-    replaceStepAgent(wfId, stepId, agentId);
   }
 
   async function handleSendChannelMessage(content: string) {
@@ -630,20 +613,17 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
         <TabsContent value="execution" className="space-y-4">
           {activeRun ? (
             <div className="space-y-4">
-              <RunSummaryBar run={activeRun} steps={workflowSteps} />
+              <RunSummaryBar run={activeRun} tasks={executionTasks} />
               <div className="space-y-3">
-                <h3 className="text-sm font-medium">步骤</h3>
-                {workflowSteps.length > 0 ? (
-                  [...workflowSteps]
+                    <h3 className="text-sm font-medium">步骤</h3>
+                {executionTasks.length > 0 ? (
+                  [...executionTasks]
                     .sort((a, b) => a.step_order - b.step_order)
                     .map((step) => (
                       <ExecutionStepCard
                         key={step.id}
                         step={step}
                         agents={agents}
-                        workflowId={step.workflow_id}
-                        onRetry={handleRetryStep}
-                        onReplaceAgent={handleReplaceAgent}
                       />
                     ))
                 ) : (
@@ -853,13 +833,13 @@ const RUN_STATUS_LABEL: Record<string, string> = {
 
 function RunSummaryBar({
   run,
-  steps,
+  tasks,
 }: {
   run: ProjectRun;
-  steps: WorkflowStep[];
+  tasks: Task[];
 }) {
-  const completedCount = steps.filter((s) => s.status === "completed").length;
-  const totalCount = steps.length;
+  const completedCount = tasks.filter((s) => s.status === "completed").length;
+  const totalCount = tasks.length;
   const progressPct =
     totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 

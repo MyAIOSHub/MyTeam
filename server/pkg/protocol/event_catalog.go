@@ -1,12 +1,9 @@
 // Package protocol declares wire-level types and the canonical EventCatalog
 // per PRD §2.2.
 //
-// IMPORTANT: EventCatalog reflects the PRD §2.2 forward-looking event names.
-// Existing emitter constants in events.go and hub.go may use older naming
-// (e.g. catalog `plan:created` vs emitted `plan:generated`). Reconciliation
-// is tracked as a separate integration pass — when adding a NEW event, please
-// align both catalog and emitter to PRD naming. Do NOT silently bridge
-// catalog names to legacy emitter names.
+// IMPORTANT: EventCatalog reflects the PRD §2.2 event names. Catalog names are
+// canonical for PRD events; when adding or reconciling emitters, align them to
+// these names. Do NOT silently bridge catalog names to legacy emitter names.
 package protocol
 
 // EventDomain categorizes events for catalog/documentation purposes.
@@ -50,6 +47,7 @@ var EventCatalog = []EventDef{
 	{Type: "execution:completed", Domain: DomainProject, Description: "Execution completed.", PayloadKeys: []string{"execution_id", "result"}},
 	{Type: "execution:failed", Domain: DomainProject, Description: "Execution failed.", PayloadKeys: []string{"execution_id", "error"}},
 	{Type: "execution:progress", Domain: DomainProject, Description: "Streaming progress update.", PayloadKeys: []string{"execution_id", "progress_payload"}},
+	{Type: "execution:message", Domain: DomainProject, Description: "Streaming execution message.", PayloadKeys: []string{"execution_id", "message"}},
 	{Type: "artifact:created", Domain: DomainProject, Description: "Artifact version created.", PayloadKeys: []string{"artifact_id", "task_id", "version"}},
 	{Type: "review:submitted", Domain: DomainProject, Description: "Review decision recorded.", PayloadKeys: []string{"review_id", "artifact_id", "decision"}},
 

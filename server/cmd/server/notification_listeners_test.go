@@ -73,7 +73,7 @@ func TestNotification_IssueCreated_AssigneeNotified(t *testing.T) {
 		cleanupTestIssue(t, issueID)
 	})
 
-	// Track inbox:new events
+	// Track inbox item created events
 	var inboxEvents []events.Event
 	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
 		inboxEvents = append(inboxEvents, e)
@@ -118,9 +118,9 @@ func TestNotification_IssueCreated_AssigneeNotified(t *testing.T) {
 		t.Fatalf("expected 0 inbox items for creator, got %d", len(creatorItems))
 	}
 
-	// At least one inbox:new event should have been published
+	// At least one inbox item created event should have been published
 	if len(inboxEvents) < 1 {
-		t.Fatal("expected at least 1 inbox:new event")
+		t.Fatal("expected at least 1 inbox item created event")
 	}
 }
 
@@ -168,7 +168,7 @@ func TestNotification_IssueCreated_SelfAssign(t *testing.T) {
 		t.Fatalf("expected 0 inbox items for self-assign, got %d", len(items))
 	}
 	if len(inboxEvents) != 0 {
-		t.Fatalf("expected 0 inbox:new events for self-assign, got %d", len(inboxEvents))
+		t.Fatalf("expected 0 inbox item created events for self-assign, got %d", len(inboxEvents))
 	}
 }
 
@@ -212,7 +212,7 @@ func TestNotification_IssueCreated_NoAssignee(t *testing.T) {
 		t.Fatalf("expected 0 inbox items for no-assignee issue, got %d", len(items))
 	}
 	if len(inboxEvents) != 0 {
-		t.Fatalf("expected 0 inbox:new events, got %d", len(inboxEvents))
+		t.Fatalf("expected 0 inbox item created events, got %d", len(inboxEvents))
 	}
 }
 
@@ -419,8 +419,8 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 				AssigneeType: &newAssigneeType,
 				AssigneeID:   &newAssigneeID,
 			},
-			"assignee_changed":  true,
-			"status_changed":    false,
+			"assignee_changed":   true,
+			"status_changed":     false,
 			"prev_assignee_type": &oldAssigneeType,
 			"prev_assignee_id":   &oldAssigneeID,
 		},
