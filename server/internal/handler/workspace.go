@@ -194,12 +194,31 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ownerUUID := parseUUID(userID)
+
+	// Auto-provision the creator's personal agent synchronously so it's visible
+	// in the DM list as soon as this response returns. Best-effort: a failure
+	// here shouldn't fail the workspace create.
+	if user, err := h.Queries.GetUser(r.Context(), ownerUUID); err == nil {
+		if _, err := service.EnsurePersonalAgent(r.Context(), h.Queries, ws.ID, ownerUUID, user.Name); err != nil {
+			slog.Warn("auto-provision personal agent failed",
+				"workspace_id", uuidToString(ws.ID),
+				"user_id", userID,
+				"error", err,
+			)
+		}
+	} else {
+		slog.Warn("auto-provision personal agent: load user failed",
+			"user_id", userID,
+			"error", err,
+		)
+	}
+
 	// Auto-create system agent (and page system agents) for the new workspace.
 	// System agents have owner_id IS NULL after Account Phase 2; we still need
 	// the cloud runtime to attach them to.
 	go func() {
 		ctx := context.Background()
-		ownerUUID := parseUUID(userID)
 		runtime, rerr := h.Queries.EnsureCloudRuntime(ctx, ws.ID)
 		if rerr != nil {
 			slog.Warn("auto-create system agent: ensure cloud runtime failed", "error", rerr)
@@ -434,6 +453,18 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("member added", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "email", email, "role", role)...)
+
+	// Auto-provision a personal agent for the new member so they have a working
+	// DM target the moment they next sign in. Best-effort: never fail member
+	// creation because of agent provisioning.
+	if _, err := service.EnsurePersonalAgent(r.Context(), h.Queries, parseUUID(workspaceID), user.ID, user.Name); err != nil {
+		slog.Warn("auto-provision personal agent for new member failed",
+			"workspace_id", workspaceID,
+			"user_id", uuidToString(user.ID),
+			"error", err,
+		)
+	}
+
 	userID := requestUserID(r)
 	eventPayload := map[string]any{"member": memberWithUserResponse(member, user)}
 	if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID)); err == nil {
