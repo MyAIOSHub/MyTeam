@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { useMessagingStore } from "@/features/messaging/store";
 import { useChannelStore } from "@/features/channels/store";
@@ -14,7 +14,7 @@ import { api } from "@/shared/api";
 import type { Conversation } from "@/shared/types/messaging";
 import type { Message } from "@/shared/types/messaging";
 import type { Channel } from "@/shared/types/messaging";
-import type { InboxItem } from "@/shared/types";
+import type { InboxItem, Agent } from "@/shared/types";
 import { toast } from "sonner";
 import {
   Hash,
@@ -290,6 +290,10 @@ export default function SessionPage() {
   const fetchDmMessages = useMessagingStore((s) => s.loadMessages);
   const sendDmMessage = useMessagingStore((s) => s.sendMessage);
 
+  // Personal agent — always shown in DM list as online + interactable, even
+  // before the user has exchanged any messages with it.
+  const [personalAgent, setPersonalAgent] = useState<Agent | null>(null);
+
   const channels = useChannelStore((s) => s.channels);
   const currentChannel = useChannelStore((s) => s.currentChannel);
   const channelMembers = useChannelStore((s) => s.members);
@@ -307,7 +311,29 @@ export default function SessionPage() {
   useEffect(() => {
     fetchConversations();
     fetchChannels();
+    // Personal agent is auto-provisioned on the server; if the call fails we
+    // simply skip the synthetic DM row rather than blocking the page.
+    api
+      .getPersonalAgent()
+      .then((agent) => setPersonalAgent(agent))
+      .catch(() => setPersonalAgent(null));
   }, [fetchConversations, fetchChannels]);
+
+  // DM list shown in the sidebar = real conversations + the personal agent
+  // (if it isn't already present from prior messages).
+  const sidebarConversations = useMemo<Conversation[]>(() => {
+    if (!personalAgent) return conversations;
+    if (conversations.some((c) => c.peer_id === personalAgent.id)) {
+      return conversations;
+    }
+    const synthetic: Conversation = {
+      peer_id: personalAgent.id,
+      peer_type: "agent",
+      peer_name: personalAgent.display_name || personalAgent.name,
+      unread_count: 0,
+    };
+    return [synthetic, ...conversations];
+  }, [conversations, personalAgent]);
 
   // Selection scope follows the active channel/dm. Switching conversations
   // clears whatever was selected so we never leak picks across rooms.
@@ -376,7 +402,7 @@ export default function SessionPage() {
   // Send handlers
   const handleSendDm = useCallback(
     async (content: string, fileInfo?: { file_id: string; file_name: string; file_size: number; file_content_type: string }) => {
-      const conv = conversations.find((c) => c.peer_id === selectedId);
+      const conv = sidebarConversations.find((c) => c.peer_id === selectedId);
       if (!conv) return;
       await sendDmMessage({
         recipient_id: conv.peer_id,
@@ -385,7 +411,7 @@ export default function SessionPage() {
         ...(fileInfo ? { file_id: fileInfo.file_id, file_name: fileInfo.file_name } : {}),
       });
     },
-    [conversations, selectedId, sendDmMessage],
+    [sidebarConversations, selectedId, sendDmMessage],
   );
 
   const handleSendChannel = useCallback(
@@ -434,7 +460,7 @@ export default function SessionPage() {
   const messages = selectedType === "dm" ? dmMessages : channelMessages;
   const headerName =
     selectedType === "dm"
-      ? conversations.find((c) => c.peer_id === selectedId)?.peer_name ||
+      ? sidebarConversations.find((c) => c.peer_id === selectedId)?.peer_name ||
         selectedId?.slice(0, 12) ||
         ""
       : currentChannel?.name
@@ -444,14 +470,14 @@ export default function SessionPage() {
     selectedType === "channel" && channelMembers.length > 0
       ? `${channelMembers.length} 位成员`
       : selectedType === "dm"
-        ? conversations.find((c) => c.peer_id === selectedId)?.peer_type ?? ""
+        ? sidebarConversations.find((c) => c.peer_id === selectedId)?.peer_type ?? ""
         : "";
 
   return (
     <div className="flex h-full">
       {/* Left sidebar */}
       <SessionSidebar
-        conversations={conversations}
+        conversations={sidebarConversations}
         channels={channels}
         selectedId={selectedId}
         selectedType={selectedType}
