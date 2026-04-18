@@ -8,7 +8,7 @@
 
 : "${BASE_URL:=http://localhost:8080}"
 : "${RESULTS_FILE:=/tmp/scenario-results.tsv}"
-: "${HTTP_CODE_FILE:=/tmp/.scenario_http_code}"
+: "${HTTP_CODE_FILE:=${TMPDIR:-/tmp}/.scenario_http_code.$$}"
 HTTP_CODE=""
 
 # Wrapper around `cat $HTTP_CODE_FILE` so callers stay readable.

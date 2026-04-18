@@ -98,7 +98,7 @@ func TestMeetingService_HappyPath(t *testing.T) {
 	}
 
 	// --- ASR returns a 2-item summary; one with high confidence ---
-	svc := NewMeetingService(q, fakeSecrets{}, &fakeASR{
+	svc := NewMeetingService(q, openTestPool(t), fakeSecrets{}, &fakeASR{
 		bundle: asr.SummaryBundle{
 			Provider:  "doubao_miaoji",
 			Sections:  []string{"intro", "decisions"},
@@ -252,7 +252,7 @@ func TestMeetingService_NotMeeting(t *testing.T) {
 		t.Fatalf("thread: %v", err)
 	}
 
-	svc := NewMeetingService(q, fakeSecrets{}, &fakeASR{})
+	svc := NewMeetingService(q, openTestPool(t), fakeSecrets{}, &fakeASR{})
 	// Did NOT call StartMeeting — Summarize must refuse
 	_, err = svc.Summarize(ctx, uuid.UUID(thread.ID.Bytes), "u")
 	if err == nil || err.Error() != ErrNotMeeting.Error() {

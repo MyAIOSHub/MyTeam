@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -19,6 +21,13 @@ import (
 	"github.com/multica-ai/multica/server/internal/service/asr"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// TxStarter mirrors handler.txStarter — anything with a Begin(ctx) method
+// returning pgx.Tx. Production wires *pgxpool.Pool; tests can drop in a
+// pgx.Conn or a fake.
+type TxStarter interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
 
 // MeetingStatus mirrors thread.metadata.meeting_status. Pure runtime value,
 // no DB CHECK constraint (the meeting kind itself is opt-in).
@@ -73,14 +82,19 @@ type SecretGetter interface {
 
 // MeetingService orchestrates the meeting flow. ASR is an interface so
 // tests can inject a fixed-response mock; production wires Doubao 妙记.
+//
+// Tx is optional but strongly recommended in production — without it,
+// Summarize and ApproveActionItem fall back to non-transactional writes,
+// which leaves a partial-write window if the second statement fails.
 type MeetingService struct {
 	Q       *db.Queries
+	Tx      TxStarter
 	Secrets SecretGetter
 	ASR     asr.Client
 }
 
-func NewMeetingService(q *db.Queries, secrets SecretGetter, asrClient asr.Client) *MeetingService {
-	return &MeetingService{Q: q, Secrets: secrets, ASR: asrClient}
+func NewMeetingService(q *db.Queries, tx TxStarter, secrets SecretGetter, asrClient asr.Client) *MeetingService {
+	return &MeetingService{Q: q, Tx: tx, Secrets: secrets, ASR: asrClient}
 }
 
 // ErrNotMeeting / ErrAudioMissing are sentinel errors callers can branch on
@@ -158,7 +172,8 @@ func (s *MeetingService) Summarize(ctx context.Context, threadID uuid.UUID, audi
 		return asr.SummaryBundle{}, fmt.Errorf("asr: %w", err)
 	}
 
-	// Persist summary on the thread.
+	// Build the post-summary metadata (kept out of the tx scope so we can
+	// reuse it both inside and outside the tx branch).
 	meta.Summary = map[string]any{
 		"sections":  bundle.Sections,
 		"decisions": bundle.Decisions,
@@ -167,85 +182,150 @@ func (s *MeetingService) Summarize(ctx context.Context, threadID uuid.UUID, audi
 	meta.MeetingStatus = MeetingSummarized
 	now := time.Now().UTC()
 	meta.EndedAt = &now
-	if err := s.writeMeta(ctx, threadID, meta); err != nil {
-		return asr.SummaryBundle{}, err
+	metaBytes, err := json.Marshal(meta)
+	if err != nil {
+		return asr.SummaryBundle{}, fmt.Errorf("marshal meta: %w", err)
 	}
 
-	// Persist each action item as a context_item row.
-	for _, ai := range bundle.ActionItems {
-		bodyBytes, _ := json.Marshal(ai)
-		itemMeta, _ := json.Marshal(map[string]any{
-			"status":     ActionItemPending,
-			"confidence": ai.Confidence,
-			"owner_hint": ai.Owner,
-		})
-		if _, err := s.Q.CreateThreadContextItem(ctx, db.CreateThreadContextItemParams{
-			WorkspaceID:    thread.WorkspaceID,
-			ThreadID:       toPgUUIDFromBytes(thread.ID),
-			ItemType:       "action_item",
-			Title:          pgtype.Text{String: meetingTruncate(ai.Task, 200), Valid: true},
-			Body:           pgtype.Text{String: string(bodyBytes), Valid: true},
-			Metadata:       itemMeta,
-			RetentionClass: pgtype.Text{String: "permanent", Valid: true},
-			CreatedByType:  pgtype.Text{String: "system", Valid: true},
+	// Transactional path: thread metadata + every action_item insert
+	// committed atomically. Without Tx the writes happen sequentially
+	// and a mid-stream failure leaves the thread marked summarized but
+	// missing action items.
+	persist := func(q *db.Queries) error {
+		if err := q.UpdateThreadMetadata(ctx, db.UpdateThreadMetadataParams{
+			ID:       pgUUIDFromUUID(threadID),
+			Metadata: metaBytes,
 		}); err != nil {
-			return bundle, fmt.Errorf("persist action item %q: %w", ai.Task, err)
+			return fmt.Errorf("update thread metadata: %w", err)
 		}
+		for _, ai := range bundle.ActionItems {
+			bodyBytes, _ := json.Marshal(ai)
+			itemMeta, _ := json.Marshal(map[string]any{
+				"status":     ActionItemPending,
+				"confidence": ai.Confidence,
+				"owner_hint": ai.Owner,
+			})
+			if _, err := q.CreateThreadContextItem(ctx, db.CreateThreadContextItemParams{
+				WorkspaceID:    thread.WorkspaceID,
+				ThreadID:       toPgUUIDFromBytes(thread.ID),
+				ItemType:       "action_item",
+				Title:          pgtype.Text{String: meetingTruncate(ai.Task, 200), Valid: true},
+				Body:           pgtype.Text{String: string(bodyBytes), Valid: true},
+				Metadata:       itemMeta,
+				RetentionClass: pgtype.Text{String: "permanent", Valid: true},
+				CreatedByType:  pgtype.Text{String: "system", Valid: true},
+			}); err != nil {
+				return fmt.Errorf("persist action item %q: %w", ai.Task, err)
+			}
+		}
+		return nil
+	}
+
+	if s.Tx != nil {
+		tx, err := s.Tx.Begin(ctx)
+		if err != nil {
+			return asr.SummaryBundle{}, fmt.Errorf("begin tx: %w", err)
+		}
+		defer tx.Rollback(ctx)
+		if err := persist(s.Q.WithTx(tx)); err != nil {
+			return asr.SummaryBundle{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return asr.SummaryBundle{}, fmt.Errorf("commit: %w", err)
+		}
+		return bundle, nil
+	}
+	// No-tx fallback (test wiring without a pool, or callers that
+	// explicitly opted out). Same writes, no atomicity.
+	if err := persist(s.Q); err != nil {
+		return bundle, err
 	}
 	return bundle, nil
 }
 
 // ApproveActionItem creates a Task on the given plan with the supplied
 // primary assignee, and marks the item.metadata.status=approved with a
-// task_id pointer back. The half-auto step.
+// task_id pointer back. Half-auto step.
+//
+// Atomicity: when Tx is wired, the entire (lookup → idempotency check →
+// CreateTask → UpdateMetadata) sequence runs in one tx. The idempotency
+// check returns the previously-created task on retry instead of inserting
+// a duplicate. Without Tx the same logic runs without a row lock so a
+// concurrent Approve race could double-create — production must wire Tx.
 func (s *MeetingService) ApproveActionItem(ctx context.Context, itemID, planID, primaryAssigneeID uuid.UUID) (db.Task, error) {
-	item, err := s.Q.GetThreadContextItem(ctx, pgUUIDFromUUID(itemID))
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return db.Task{}, ErrItemNotFound
+	approve := func(q *db.Queries) (db.Task, error) {
+		item, err := q.GetThreadContextItem(ctx, pgUUIDFromUUID(itemID))
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return db.Task{}, ErrItemNotFound
+			}
+			return db.Task{}, err
 		}
-		return db.Task{}, err
-	}
-	var ai asr.ActionItem
-	if err := json.Unmarshal([]byte(item.Body.String), &ai); err != nil {
-		return db.Task{}, fmt.Errorf("decode action item body: %w", err)
+
+		// Idempotency: if this item already has task_id, return that task
+		// instead of creating a new one. Survives both retries-after-error
+		// and double-approve UI clicks.
+		itemMeta := mustMeta(item.Metadata)
+		if existing, ok := itemMeta["task_id"].(string); ok && existing != "" {
+			tid, parseErr := uuid.Parse(existing)
+			if parseErr == nil {
+				if existingTask, err := q.GetTask(ctx, pgUUIDFromUUID(tid)); err == nil {
+					return existingTask, nil
+				}
+			}
+		}
+
+		var ai asr.ActionItem
+		if err := json.Unmarshal([]byte(item.Body.String), &ai); err != nil {
+			return db.Task{}, fmt.Errorf("decode action item body: %w", err)
+		}
+		plan, err := q.GetPlan(ctx, pgUUIDFromUUID(planID))
+		if err != nil {
+			return db.Task{}, fmt.Errorf("plan not found: %w", err)
+		}
+		task, err := q.CreateTask(ctx, db.CreateTaskParams{
+			PlanID:            plan.ID,
+			WorkspaceID:       plan.WorkspaceID,
+			Title:             ai.Task,
+			Description:       pgtype.Text{String: ai.Owner + " — from meeting", Valid: ai.Owner != ""},
+			StepOrder:         pgtype.Int4{Int32: 1, Valid: true},
+			PrimaryAssigneeID: pgUUIDFromUUID(primaryAssigneeID),
+			DependsOn:         []pgtype.UUID{},
+			FallbackAgentIds:  []pgtype.UUID{},
+			RequiredSkills:    []string{},
+		})
+		if err != nil {
+			return db.Task{}, fmt.Errorf("create task: %w", err)
+		}
+		itemMeta["status"] = ActionItemApproved
+		itemMeta["task_id"] = uuid.UUID(task.ID.Bytes).String()
+		itemMeta["approved_at"] = time.Now().UTC()
+		mb, _ := json.Marshal(itemMeta)
+		if err := q.UpdateThreadContextItemMetadata(ctx, db.UpdateThreadContextItemMetadataParams{
+			ID:       item.ID,
+			Metadata: mb,
+		}); err != nil {
+			return db.Task{}, fmt.Errorf("update item metadata: %w", err)
+		}
+		return task, nil
 	}
 
-	plan, err := s.Q.GetPlan(ctx, pgUUIDFromUUID(planID))
-	if err != nil {
-		return db.Task{}, fmt.Errorf("plan not found: %w", err)
+	if s.Tx != nil {
+		tx, err := s.Tx.Begin(ctx)
+		if err != nil {
+			return db.Task{}, fmt.Errorf("begin tx: %w", err)
+		}
+		defer tx.Rollback(ctx)
+		task, err := approve(s.Q.WithTx(tx))
+		if err != nil {
+			return db.Task{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return db.Task{}, fmt.Errorf("commit: %w", err)
+		}
+		return task, nil
 	}
-
-	task, err := s.Q.CreateTask(ctx, db.CreateTaskParams{
-		PlanID:            plan.ID,
-		WorkspaceID:       plan.WorkspaceID,
-		Title:             ai.Task,
-		Description:       pgtype.Text{String: ai.Owner + " — from meeting", Valid: ai.Owner != ""},
-		StepOrder:         pgtype.Int4{Int32: 1, Valid: true},
-		PrimaryAssigneeID: pgUUIDFromUUID(primaryAssigneeID),
-		DependsOn:         []pgtype.UUID{},
-		FallbackAgentIds:  []pgtype.UUID{},
-		RequiredSkills:    []string{},
-	})
-	if err != nil {
-		return db.Task{}, fmt.Errorf("create task: %w", err)
-	}
-
-	// Patch the item metadata to reflect approval + task linkage.
-	itemMeta := mustMeta(item.Metadata)
-	itemMeta["status"] = ActionItemApproved
-	itemMeta["task_id"] = uuid.UUID(task.ID.Bytes).String()
-	itemMeta["approved_at"] = time.Now().UTC()
-	mb, _ := json.Marshal(itemMeta)
-	if err := s.Q.UpdateThreadContextItemMetadata(ctx, db.UpdateThreadContextItemMetadataParams{
-		ID:       item.ID,
-		Metadata: mb,
-	}); err != nil {
-		// Task is already created; failing the metadata update would
-		// leave a duplicate-on-retry risk. Surface so caller can decide.
-		return task, fmt.Errorf("task created but metadata update failed: %w", err)
-	}
-	return task, nil
+	return approve(s.Q)
 }
 
 // RejectActionItem tombstones an item without creating a task.
@@ -321,7 +401,14 @@ func (s *MeetingService) loadMeta(ctx context.Context, threadID uuid.UUID) (Meet
 	}
 	var meta MeetingMeta
 	if len(thread.Metadata) > 0 {
-		_ = json.Unmarshal(thread.Metadata, &meta)
+		if err := json.Unmarshal(thread.Metadata, &meta); err != nil {
+			// A corrupt metadata blob silently looks like "no meeting"
+			// to the caller and StartMeeting will overwrite it. Loud
+			// warn so we notice during dev/staging.
+			slog.Warn("meeting: thread.metadata decode failed",
+				"thread_id", uuid.UUID(thread.ID.Bytes).String(),
+				"err", err)
+		}
 	}
 	if meta.Kind != "meeting" {
 		return meta, thread, ErrNotMeeting
@@ -373,9 +460,16 @@ func mustMeta(raw []byte) map[string]any {
 	return out
 }
 
+// meetingTruncate caps a string at n bytes without splitting a UTF-8
+// rune. Action-item titles are commonly Chinese; naive byte-slicing
+// produces invalid UTF-8 that DB drivers may silently mangle.
 func meetingTruncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n]
+	out := s[:n]
+	for len(out) > 0 && !utf8.ValidString(out) {
+		out = out[:len(out)-1]
+	}
+	return out
 }

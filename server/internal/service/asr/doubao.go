@@ -7,10 +7,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// maxResponseBytes caps the upstream response we read into memory. The
+// 妙记 endpoint typically returns <100KB; capping at 4MB protects against
+// a misconfigured Endpoint (test/proxy) flooding the process.
+const maxResponseBytes = 4 << 20
 
 // MiaojiClient is the Doubao 妙记 (Lark Audio Understanding) batch impl.
 // Two-step flow: POST submit returns a task_id; GET query polls until
@@ -113,16 +119,16 @@ func (c *MiaojiClient) submit(ctx context.Context, creds Credentials, audioURL s
 		return "", err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if resp.StatusCode/100 != 2 {
-		return "", fmt.Errorf("submit http %d: %s", resp.StatusCode, string(raw))
+		return "", fmt.Errorf("submit http %d: %s", resp.StatusCode, redactedBody(raw, creds))
 	}
 	var sr submitResp
 	if err := json.Unmarshal(raw, &sr); err != nil {
-		return "", fmt.Errorf("decode submit: %w (body=%s)", err, string(raw))
+		return "", fmt.Errorf("decode submit: %w (body=%s)", err, redactedBody(raw, creds))
 	}
 	if sr.Resp.ID == "" {
-		return "", fmt.Errorf("submit returned empty id (body=%s)", string(raw))
+		return "", fmt.Errorf("submit returned empty id (body=%s)", redactedBody(raw, creds))
 	}
 	return sr.Resp.ID, nil
 }
@@ -138,9 +144,9 @@ func (c *MiaojiClient) query(ctx context.Context, creds Credentials, taskID stri
 		return SummaryBundle{}, false, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if resp.StatusCode/100 != 2 {
-		return SummaryBundle{}, false, fmt.Errorf("query http %d: %s", resp.StatusCode, string(raw))
+		return SummaryBundle{}, false, fmt.Errorf("query http %d: %s", resp.StatusCode, redactedBody(raw, creds))
 	}
 	var qr queryResp
 	if err := json.Unmarshal(raw, &qr); err != nil {
@@ -193,4 +199,23 @@ func (c *MiaojiClient) applyHeaders(req *http.Request, creds Credentials) {
 	req.Header.Set("X-Api-Access-Key", creds.AccessToken)
 	req.Header.Set("X-Api-Resource-Id", c.ResourceID)
 	req.Header.Set("X-Api-Request-Id", uuid.NewString())
+}
+
+// redactedBody truncates the body for inclusion in error messages and
+// strips any substring matching the credentials. Some misbehaving proxies
+// echo request headers in error responses; without this scrub the access
+// token would land in structured logs via wrapped errors.
+func redactedBody(raw []byte, creds Credentials) string {
+	const maxLen = 512
+	s := string(raw)
+	if creds.AccessToken != "" {
+		s = strings.ReplaceAll(s, creds.AccessToken, "[REDACTED-TOKEN]")
+	}
+	if creds.SecretKey != "" {
+		s = strings.ReplaceAll(s, creds.SecretKey, "[REDACTED-SECRET]")
+	}
+	if len(s) > maxLen {
+		s = s[:maxLen] + "...[truncated]"
+	}
+	return s
 }
