@@ -210,6 +210,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					// external integrations and are never exposed to members).
 					r.Route("/secrets", func(r chi.Router) {
 						r.Get("/", h.ListWorkspaceSecrets)
+						// Convenience PUT for the 5-key TOS storage block.
+						// Routed before {key} so chi matches the literal path first.
+						r.Put("/storage", h.SetStorageSecrets)
 						r.Get("/{key}", h.GetWorkspaceSecret)
 						r.Put("/{key}", h.SetWorkspaceSecret)
 						r.Delete("/{key}", h.DeleteWorkspaceSecret)

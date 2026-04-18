@@ -235,6 +235,73 @@ func (h *Handler) SetWorkspaceSecret(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"key": key, "status": "ok"})
 }
 
+// SetStorageSecrets writes the 5 Volcengine TOS keys atomically.
+// Convenience wrapper over SetWorkspaceSecret so the UI doesn't have
+// to fire 5 sequential PUTs. Empty values are skipped (no-op for that
+// key) so callers can rotate one field at a time.
+//
+// PUT /api/workspaces/{id}/secrets/storage
+//
+//	{ "tos_access_key_id": "...", "tos_secret_access_key": "...",
+//	  "tos_bucket": "...", "tos_region": "cn-beijing",
+//	  "tos_endpoint": "https://tos-s3-cn-beijing.volces.com" }
+func (h *Handler) SetStorageSecrets(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "id")
+	if !h.requireWorkspaceAdmin(w, r, workspaceID) {
+		return
+	}
+	masterKey, err := loadSecretMasterKey()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "secret encryption not configured: "+err.Error())
+		return
+	}
+
+	var req struct {
+		TOSAccessKeyID     string `json:"tos_access_key_id"`
+		TOSSecretAccessKey string `json:"tos_secret_access_key"`
+		TOSBucket          string `json:"tos_bucket"`
+		TOSRegion          string `json:"tos_region"`
+		TOSEndpoint        string `json:"tos_endpoint"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+
+	pairs := []struct{ key, value string }{
+		{"tos_access_key_id", req.TOSAccessKeyID},
+		{"tos_secret_access_key", req.TOSSecretAccessKey},
+		{"tos_bucket", req.TOSBucket},
+		{"tos_region", req.TOSRegion},
+		{"tos_endpoint", req.TOSEndpoint},
+	}
+	userID := requestUserID(r)
+	written := 0
+	for _, p := range pairs {
+		if p.value == "" {
+			continue
+		}
+		encrypted, encErr := crypto.Encrypt([]byte(p.value), masterKey, secretAAD(workspaceID, p.key))
+		if encErr != nil {
+			slog.Error("storage secret encrypt failed", "workspace_id", workspaceID, "key", p.key, "err", encErr)
+			writeError(w, http.StatusInternalServerError, "encrypt failed for "+p.key)
+			return
+		}
+		if _, dbErr := h.Queries.CreateWorkspaceSecret(r.Context(), db.CreateWorkspaceSecretParams{
+			WorkspaceID:    parseUUID(workspaceID),
+			Key:            p.key,
+			ValueEncrypted: encrypted,
+			CreatedBy:      parseUUID(userID),
+		}); dbErr != nil {
+			slog.Error("storage secret save failed", "workspace_id", workspaceID, "key", p.key, "err", dbErr)
+			writeError(w, http.StatusInternalServerError, "save failed for "+p.key)
+			return
+		}
+		written++
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "written": written})
+}
+
 // DeleteWorkspaceSecret removes a secret outright. No 404 is returned when
 // the key is absent because the operation is idempotent and the underlying
 // query is :exec.
