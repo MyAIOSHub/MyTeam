@@ -1,6 +1,7 @@
 "use client";
-import { MessageSquare } from "lucide-react";
+import { Check, MessageSquare } from "lucide-react";
 
+import { useMessageSelectionStore } from "@/features/messaging/stores/selection-store";
 import { useWorkspaceStore } from "@/features/workspace";
 
 interface MessageListProps {
@@ -18,10 +19,16 @@ interface MessageListProps {
   currentUserId?: string;
   onOpenThread?: (messageId: string) => void;
   typingUsers?: string[];
+  // When true, every message renders a checkbox so the user can pick a
+  // subset to feed into "Generate Project from selection". Owned by the
+  // session page; this component just reflects the parent's intent.
+  selectionEnabled?: boolean;
 }
 
-export function MessageList({ messages, currentUserId, onOpenThread, typingUsers = [] }: MessageListProps) {
+export function MessageList({ messages, currentUserId, onOpenThread, typingUsers = [], selectionEnabled = false }: MessageListProps) {
   const members = useWorkspaceStore((s) => s.members);
+  const selectedIds = useMessageSelectionStore((s) => s.selectedIds);
+  const toggleSelection = useMessageSelectionStore((s) => s.toggle);
 
   const resolveDisplayName = (senderId: string): string => {
     const member = members.find((m) => m.user_id === senderId);
@@ -30,12 +37,33 @@ export function MessageList({ messages, currentUserId, onOpenThread, typingUsers
 
   return (
     <div className="flex-1 overflow-auto p-4 space-y-1">
-      {messages.map((msg) => (
+      {messages.map((msg) => {
+        const isSelected = selectedIds.has(msg.id);
+        return (
         <div
           key={msg.id}
-          className="group relative px-3 py-2 rounded-[6px] hover:bg-accent/50 transition-colors"
+          className={`group relative px-3 py-2 rounded-[6px] transition-colors ${isSelected ? "bg-primary/10" : "hover:bg-accent/50"}`}
         >
           <div className="flex items-start gap-3">
+            {/* Selection checkbox — visible when selection mode is on, OR
+                when the message is already selected (so the user can see
+                what they picked even after toggling the mode off). */}
+            {(selectionEnabled || isSelected) && (
+              <button
+                type="button"
+                onClick={() => toggleSelection(msg.id)}
+                aria-label={isSelected ? "Deselect message" : "Select message"}
+                aria-pressed={isSelected}
+                className={`mt-1 w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                  isSelected
+                    ? "bg-primary border-primary text-primary-foreground"
+                    : "border-muted-foreground/40 hover:border-primary"
+                }`}
+              >
+                {isSelected && <Check className="h-3 w-3" />}
+              </button>
+            )}
+
             {/* Avatar */}
             <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-[12px] font-medium text-secondary-foreground shrink-0 mt-0.5">
               {msg.sender_id.slice(0, 2).toUpperCase()}
@@ -91,7 +119,8 @@ export function MessageList({ messages, currentUserId, onOpenThread, typingUsers
             )}
           </div>
         </div>
-      ))}
+        );
+      })}
       {messages.length === 0 && (
         <div className="text-center text-muted-foreground mt-8 text-[13px]">
           暂无消息

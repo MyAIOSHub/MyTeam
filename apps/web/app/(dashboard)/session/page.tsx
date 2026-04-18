@@ -8,6 +8,8 @@ import { useInboxStore } from "@/features/inbox";
 import { MessageList } from "@/features/messaging/components/message-list";
 import { MessageInput } from "@/features/messaging/components/message-input";
 import { ThreadPanel } from "@/features/messaging/components/thread-panel";
+import { GenerateProjectButton } from "@/features/messaging/components/generate-project-button";
+import { useMessageSelectionStore } from "@/features/messaging/stores/selection-store";
 import { api } from "@/shared/api";
 import type { Conversation } from "@/shared/types/messaging";
 import type { Message } from "@/shared/types/messaging";
@@ -19,6 +21,7 @@ import {
   MessageCircle,
   Bell,
   BellDot,
+  CheckSquare,
   Inbox,
   Users,
   Archive,
@@ -269,6 +272,12 @@ export default function SessionPage() {
     urlType === "channel" ? "channel" : "dm",
   );
   const [showInbox, setShowInbox] = useState(false);
+  // Whether checkboxes are visible on every message. The store remembers
+  // which ids are selected; this just toggles whether the UI shows them.
+  const [selectionEnabled, setSelectionEnabled] = useState(false);
+  const setSelectionScope = useMessageSelectionStore((s) => s.setScope);
+  const clearSelection = useMessageSelectionStore((s) => s.clear);
+  const selectionCount = useMessageSelectionStore((s) => s.selectedIds.size);
 
   // Channel messages (local state like channel detail page)
   const [channelMessages, setChannelMessages] = useState<Message[]>([]);
@@ -299,6 +308,17 @@ export default function SessionPage() {
     fetchConversations();
     fetchChannels();
   }, [fetchConversations, fetchChannels]);
+
+  // Selection scope follows the active channel/dm. Switching conversations
+  // clears whatever was selected so we never leak picks across rooms.
+  useEffect(() => {
+    setSelectionScope(selectedType === "channel" ? selectedId : null);
+    if (selectedType !== "channel") {
+      // Selection mode is channel-only for now. Hide the checkboxes so the
+      // DM view stays clean.
+      setSelectionEnabled(false);
+    }
+  }, [selectedId, selectedType, setSelectionScope]);
 
   // Sync URL param on mount
   useEffect(() => {
@@ -491,22 +511,54 @@ export default function SessionPage() {
                   </>
                 )}
               </div>
-              <button
-                onClick={() => setShowInbox(!showInbox)}
-                className="relative p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-                title="通知"
-              >
-                {inboxUnread > 0 ? (
-                  <BellDot className="h-4 w-4" />
-                ) : (
-                  <Bell className="h-4 w-4" />
+              <div className="flex items-center gap-2">
+                {selectedType === "channel" && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selectionEnabled) {
+                          // Turning off selection mode also clears picks so a
+                          // re-enable starts fresh.
+                          clearSelection();
+                        }
+                        setSelectionEnabled(!selectionEnabled);
+                      }}
+                      title={selectionEnabled ? "Exit selection mode" : "Select messages for project"}
+                      className={`flex items-center gap-1 px-2 h-7 rounded-md text-[12px] transition-colors ${
+                        selectionEnabled
+                          ? "bg-accent text-foreground"
+                          : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                      }`}
+                    >
+                      <CheckSquare className="h-3.5 w-3.5" />
+                      {selectionEnabled ? `Selecting (${selectionCount})` : "Select"}
+                    </button>
+                    {selectedId && (
+                      <GenerateProjectButton
+                        channelId={selectedId}
+                        channelName={currentChannel?.name ?? "channel"}
+                      />
+                    )}
+                  </>
                 )}
-                {inboxUnread > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 text-[9px] bg-primary text-white rounded-full h-3.5 w-3.5 flex items-center justify-center leading-none">
-                    {inboxUnread > 9 ? "9+" : inboxUnread}
-                  </span>
-                )}
-              </button>
+                <button
+                  onClick={() => setShowInbox(!showInbox)}
+                  className="relative p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                  title="通知"
+                >
+                  {inboxUnread > 0 ? (
+                    <BellDot className="h-4 w-4" />
+                  ) : (
+                    <Bell className="h-4 w-4" />
+                  )}
+                  {inboxUnread > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 text-[9px] bg-primary text-white rounded-full h-3.5 w-3.5 flex items-center justify-center leading-none">
+                      {inboxUnread > 9 ? "9+" : inboxUnread}
+                    </span>
+                  )}
+                </button>
+              </div>
             </div>
 
             {/* Messages + Thread */}
@@ -515,6 +567,7 @@ export default function SessionPage() {
                 <MessageList
                   messages={messages}
                   onOpenThread={selectedType === "channel" ? (msgId) => setActiveThreadId(msgId) : undefined}
+                  selectionEnabled={selectionEnabled && selectedType === "channel"}
                 />
               </div>
               {activeThreadId && selectedType === "channel" && selectedId && (

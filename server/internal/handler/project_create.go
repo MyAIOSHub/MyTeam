@@ -16,9 +16,16 @@ import (
 )
 
 // SourceRef identifies a conversation source for project context.
+//
+// MessageIDs (optional) narrows the source to a specific subset of messages
+// inside the channel/dm/thread. When omitted the handler loads the most
+// recent 100 messages — the legacy whole-conversation behavior. The UI uses
+// this to let a user multi-select messages and turn just those into a
+// project (PRD §7 "selected chat → todolist").
 type SourceRef struct {
-	Type string `json:"type"` // "channel", "dm", "thread"
-	ID   string `json:"id"`   // UUID of the channel/dm/thread
+	Type       string   `json:"type"`                  // "channel", "dm", "thread"
+	ID         string   `json:"id"`                    // UUID of the channel/dm/thread
+	MessageIDs []string `json:"message_ids,omitempty"` // optional subset filter
 }
 
 // CreateProjectFromChatRequest is the request body for POST /api/projects/from-chat.
@@ -118,20 +125,15 @@ func (h *Handler) CreateProjectFromChat(w http.ResponseWriter, r *http.Request) 
 	for _, ref := range req.SourceRefs {
 		switch ref.Type {
 		case "channel":
-			// Validate channel exists
 			ch, err := h.Queries.GetChannel(ctx, parseUUID(ref.ID))
 			if err != nil {
 				writeError(w, http.StatusBadRequest, fmt.Sprintf("channel %s not found", ref.ID))
 				return
 			}
-
-			// Verify user has access (is a member of the workspace that owns this channel)
 			if uuidToString(ch.WorkspaceID) != workspaceID {
 				writeError(w, http.StatusForbidden, fmt.Sprintf("channel %s is not in this workspace", ref.ID))
 				return
 			}
-
-			// Fetch messages from channel (last 100)
 			messages, err := h.Queries.ListChannelMessages(ctx, db.ListChannelMessagesParams{
 				ChannelID: parseUUID(ref.ID),
 				Limit:     100,
@@ -140,18 +142,12 @@ func (h *Handler) CreateProjectFromChat(w http.ResponseWriter, r *http.Request) 
 			if err != nil {
 				slog.Warn("failed to fetch channel messages for project context", "channel_id", ref.ID, "error", err)
 			} else {
+				messages = filterMessagesByID(messages, ref.MessageIDs)
 				contextParts = append(contextParts, formatMessagesAsContext(messages, "channel", ch.Name))
 			}
-
-			sourceConversations = append(sourceConversations, map[string]any{
-				"conversation_id": ref.ID,
-				"type":            "full",
-				"snapshot_at":     time.Now().UTC().Format(time.RFC3339),
-			})
+			sourceConversations = append(sourceConversations, sourceConversationEntry(ref))
 
 		case "dm":
-			// For DM, use ListChannelMessages with the DM channel ID
-			// DMs in the unified model are also channels with conversation_type = 'dm'
 			messages, err := h.Queries.ListChannelMessages(ctx, db.ListChannelMessagesParams{
 				ChannelID: parseUUID(ref.ID),
 				Limit:     100,
@@ -160,17 +156,12 @@ func (h *Handler) CreateProjectFromChat(w http.ResponseWriter, r *http.Request) 
 			if err != nil {
 				slog.Warn("failed to fetch DM messages for project context", "dm_id", ref.ID, "error", err)
 			} else {
+				messages = filterMessagesByID(messages, ref.MessageIDs)
 				contextParts = append(contextParts, formatMessagesAsContext(messages, "dm", ""))
 			}
-
-			sourceConversations = append(sourceConversations, map[string]any{
-				"conversation_id": ref.ID,
-				"type":            "full",
-				"snapshot_at":     time.Now().UTC().Format(time.RFC3339),
-			})
+			sourceConversations = append(sourceConversations, sourceConversationEntry(ref))
 
 		case "thread":
-			// Threads reference a parent message; fetch thread messages
 			messages, err := h.Queries.ListChannelMessages(ctx, db.ListChannelMessagesParams{
 				ChannelID: parseUUID(ref.ID),
 				Limit:     100,
@@ -179,14 +170,10 @@ func (h *Handler) CreateProjectFromChat(w http.ResponseWriter, r *http.Request) 
 			if err != nil {
 				slog.Warn("failed to fetch thread messages for project context", "thread_id", ref.ID, "error", err)
 			} else {
+				messages = filterMessagesByID(messages, ref.MessageIDs)
 				contextParts = append(contextParts, formatMessagesAsContext(messages, "thread", ""))
 			}
-
-			sourceConversations = append(sourceConversations, map[string]any{
-				"conversation_id": ref.ID,
-				"type":            "full",
-				"snapshot_at":     time.Now().UTC().Format(time.RFC3339),
-			})
+			sourceConversations = append(sourceConversations, sourceConversationEntry(ref))
 
 		default:
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid source_ref type: %s", ref.Type))
@@ -549,6 +536,44 @@ func firstNonEmpty(ss ...string) string {
 		}
 	}
 	return ""
+}
+
+// filterMessagesByID narrows the message slice to the IDs in keep. When keep
+// is empty the original slice is returned unchanged — callers want the full
+// recent window in that case (legacy behavior). Order is preserved so the
+// LLM sees the conversation in chronological order.
+func filterMessagesByID(messages []db.Message, keep []string) []db.Message {
+	if len(keep) == 0 {
+		return messages
+	}
+	want := make(map[string]struct{}, len(keep))
+	for _, id := range keep {
+		want[id] = struct{}{}
+	}
+	out := make([]db.Message, 0, len(keep))
+	for _, m := range messages {
+		if _, ok := want[uuidToString(m.ID)]; ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// sourceConversationEntry builds the audit JSON written to project.source_conversations.
+// When MessageIDs is set the entry records both the conversation_id and the
+// specific message subset so a later operator can reproduce the exact context
+// the LLM saw.
+func sourceConversationEntry(ref SourceRef) map[string]any {
+	entry := map[string]any{
+		"conversation_id": ref.ID,
+		"type":            "full",
+		"snapshot_at":     time.Now().UTC().Format(time.RFC3339),
+	}
+	if len(ref.MessageIDs) > 0 {
+		entry["type"] = "message_subset"
+		entry["message_ids"] = ref.MessageIDs
+	}
+	return entry
 }
 
 // formatMessagesAsContext converts a list of messages into a human-readable context string.

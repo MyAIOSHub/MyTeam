@@ -57,7 +57,9 @@ export type RunStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed
 
 export interface CreateProjectFromChatRequest {
   title: string;
-  source_refs: { type: 'channel' | 'dm' | 'thread'; id: string }[];
+  // message_ids narrows the source to a specific message subset inside the
+  // channel/dm/thread. Omit to use the most recent 100 messages.
+  source_refs: { type: 'channel' | 'dm' | 'thread'; id: string; message_ids?: string[] }[];
   agent_ids: string[];
   schedule_type: ProjectScheduleType;
   cron_expr?: string;
