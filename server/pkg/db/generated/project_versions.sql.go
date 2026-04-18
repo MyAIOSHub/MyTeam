@@ -12,20 +12,18 @@ import (
 )
 
 const createProjectVersion = `-- name: CreateProjectVersion :one
-INSERT INTO project_version (project_id, parent_version_id, version_number, branch_name, fork_reason, plan_snapshot, workflow_snapshot, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, project_id, version, title, description, plan_snapshot, created_by, created_at, parent_version_id, version_number, branch_name, fork_reason, workflow_snapshot, version_status, context_imports
+INSERT INTO project_version (project_id, parent_version_id, version_number, branch_name, fork_reason, created_by)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, project_id, version, title, description, created_by, created_at, parent_version_id, version_number, branch_name, fork_reason, version_status, context_imports
 `
 
 type CreateProjectVersionParams struct {
-	ProjectID        pgtype.UUID `json:"project_id"`
-	ParentVersionID  pgtype.UUID `json:"parent_version_id"`
-	VersionNumber    int32       `json:"version_number"`
-	BranchName       pgtype.Text `json:"branch_name"`
-	ForkReason       pgtype.Text `json:"fork_reason"`
-	PlanSnapshot     []byte      `json:"plan_snapshot"`
-	WorkflowSnapshot []byte      `json:"workflow_snapshot"`
-	CreatedBy        pgtype.UUID `json:"created_by"`
+	ProjectID       pgtype.UUID `json:"project_id"`
+	ParentVersionID pgtype.UUID `json:"parent_version_id"`
+	VersionNumber   int32       `json:"version_number"`
+	BranchName      pgtype.Text `json:"branch_name"`
+	ForkReason      pgtype.Text `json:"fork_reason"`
+	CreatedBy       pgtype.UUID `json:"created_by"`
 }
 
 func (q *Queries) CreateProjectVersion(ctx context.Context, arg CreateProjectVersionParams) (ProjectVersion, error) {
@@ -35,8 +33,6 @@ func (q *Queries) CreateProjectVersion(ctx context.Context, arg CreateProjectVer
 		arg.VersionNumber,
 		arg.BranchName,
 		arg.ForkReason,
-		arg.PlanSnapshot,
-		arg.WorkflowSnapshot,
 		arg.CreatedBy,
 	)
 	var i ProjectVersion
@@ -46,14 +42,12 @@ func (q *Queries) CreateProjectVersion(ctx context.Context, arg CreateProjectVer
 		&i.Version,
 		&i.Title,
 		&i.Description,
-		&i.PlanSnapshot,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.ParentVersionID,
 		&i.VersionNumber,
 		&i.BranchName,
 		&i.ForkReason,
-		&i.WorkflowSnapshot,
 		&i.VersionStatus,
 		&i.ContextImports,
 	)
@@ -61,7 +55,7 @@ func (q *Queries) CreateProjectVersion(ctx context.Context, arg CreateProjectVer
 }
 
 const getLatestProjectVersion = `-- name: GetLatestProjectVersion :one
-SELECT id, project_id, version, title, description, plan_snapshot, created_by, created_at, parent_version_id, version_number, branch_name, fork_reason, workflow_snapshot, version_status, context_imports FROM project_version WHERE project_id = $1 ORDER BY version_number DESC LIMIT 1
+SELECT id, project_id, version, title, description, created_by, created_at, parent_version_id, version_number, branch_name, fork_reason, version_status, context_imports FROM project_version WHERE project_id = $1 ORDER BY version_number DESC LIMIT 1
 `
 
 func (q *Queries) GetLatestProjectVersion(ctx context.Context, projectID pgtype.UUID) (ProjectVersion, error) {
@@ -73,14 +67,12 @@ func (q *Queries) GetLatestProjectVersion(ctx context.Context, projectID pgtype.
 		&i.Version,
 		&i.Title,
 		&i.Description,
-		&i.PlanSnapshot,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.ParentVersionID,
 		&i.VersionNumber,
 		&i.BranchName,
 		&i.ForkReason,
-		&i.WorkflowSnapshot,
 		&i.VersionStatus,
 		&i.ContextImports,
 	)
@@ -88,7 +80,7 @@ func (q *Queries) GetLatestProjectVersion(ctx context.Context, projectID pgtype.
 }
 
 const getProjectVersion = `-- name: GetProjectVersion :one
-SELECT id, project_id, version, title, description, plan_snapshot, created_by, created_at, parent_version_id, version_number, branch_name, fork_reason, workflow_snapshot, version_status, context_imports FROM project_version WHERE id = $1
+SELECT id, project_id, version, title, description, created_by, created_at, parent_version_id, version_number, branch_name, fork_reason, version_status, context_imports FROM project_version WHERE id = $1
 `
 
 func (q *Queries) GetProjectVersion(ctx context.Context, id pgtype.UUID) (ProjectVersion, error) {
@@ -100,14 +92,12 @@ func (q *Queries) GetProjectVersion(ctx context.Context, id pgtype.UUID) (Projec
 		&i.Version,
 		&i.Title,
 		&i.Description,
-		&i.PlanSnapshot,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.ParentVersionID,
 		&i.VersionNumber,
 		&i.BranchName,
 		&i.ForkReason,
-		&i.WorkflowSnapshot,
 		&i.VersionStatus,
 		&i.ContextImports,
 	)
@@ -115,7 +105,7 @@ func (q *Queries) GetProjectVersion(ctx context.Context, id pgtype.UUID) (Projec
 }
 
 const listProjectVersions = `-- name: ListProjectVersions :many
-SELECT id, project_id, version, title, description, plan_snapshot, created_by, created_at, parent_version_id, version_number, branch_name, fork_reason, workflow_snapshot, version_status, context_imports FROM project_version WHERE project_id = $1 ORDER BY version_number DESC
+SELECT id, project_id, version, title, description, created_by, created_at, parent_version_id, version_number, branch_name, fork_reason, version_status, context_imports FROM project_version WHERE project_id = $1 ORDER BY version_number DESC
 `
 
 func (q *Queries) ListProjectVersions(ctx context.Context, projectID pgtype.UUID) ([]ProjectVersion, error) {
@@ -133,14 +123,12 @@ func (q *Queries) ListProjectVersions(ctx context.Context, projectID pgtype.UUID
 			&i.Version,
 			&i.Title,
 			&i.Description,
-			&i.PlanSnapshot,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.ParentVersionID,
 			&i.VersionNumber,
 			&i.BranchName,
 			&i.ForkReason,
-			&i.WorkflowSnapshot,
 			&i.VersionStatus,
 			&i.ContextImports,
 		); err != nil {

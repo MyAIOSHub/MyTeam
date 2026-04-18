@@ -19,7 +19,7 @@ UPDATE project_run SET status = 'running', start_at = NOW(), updated_at = NOW() 
 UPDATE project_run SET status = 'completed', end_at = NOW(), output_refs = @output_refs, updated_at = NOW() WHERE id = @id;
 
 -- name: FailProjectRun :exec
-UPDATE project_run SET status = 'failed', end_at = NOW(), failure_reason = @failure_reason, retry_count = retry_count + 1, updated_at = NOW() WHERE id = @id;
+UPDATE project_run SET status = 'failed', end_at = NOW(), failure_reason = @failure_reason, updated_at = NOW() WHERE id = @id;
 
 -- name: GetActiveProjectRun :one
 SELECT * FROM project_run WHERE project_id = @project_id AND status IN ('pending', 'running') LIMIT 1;
