@@ -89,6 +89,15 @@ func (h *Handler) ListActivityLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Members get the isolated query — actor self / accessible project / owned agent task.
+	//
+	// Filter-handling divergence vs. the admin path above: the admin path
+	// dispatches to a single per-filter sqlc query (first non-empty filter
+	// wins), whereas the member query is one statement that ANDs every
+	// supplied filter together. This is intentional — admins legitimately
+	// hit each route variant in isolation, while members may pass multiple
+	// filters at once (e.g. project_id + event_type) and we want all of
+	// them to apply on top of the row-level visibility predicate. Keep
+	// both behaviors as-is unless the API contract changes.
 	params := db.ListActivityForMemberParams{
 		WorkspaceID: wsUUID,
 		SelfUserID:  member.UserID,
