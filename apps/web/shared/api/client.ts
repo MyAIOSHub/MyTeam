@@ -56,6 +56,14 @@ import type {
   RemoteSession,
   FileVersion,
   Provider,
+  Task,
+  ParticipantSlot,
+  Execution,
+  Artifact,
+  Review,
+  CreateTaskRequest,
+  CreateParticipantSlotRequest,
+  CreateReviewRequest,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
@@ -954,5 +962,53 @@ export class ApiClient {
   // Personal Agent
   async getPersonalAgent(): Promise<Agent> {
     return this.fetch<Agent>("/api/personal-agent");
+  }
+
+  // ===== Plan 5 — Task / Slot / Execution / Artifact / Review =====
+
+  async createTask(body: CreateTaskRequest): Promise<Task> {
+    return this.fetch<Task>(`/api/tasks`, { method: "POST", body: JSON.stringify(body) });
+  }
+
+  async getTask(id: string): Promise<Task> {
+    return this.fetch<Task>(`/api/tasks/${id}`);
+  }
+
+  async listTasksByPlan(planId: string): Promise<Task[]> {
+    // Server may wrap as {tasks: []}; if so, unwrap. Adapt after Batch D wires API.
+    const resp = await this.fetch<{ tasks: Task[] } | Task[]>(`/api/plans/${planId}/tasks`);
+    return Array.isArray(resp) ? resp : resp.tasks ?? [];
+  }
+
+  async listSlotsByTask(taskId: string): Promise<ParticipantSlot[]> {
+    const resp = await this.fetch<{ slots: ParticipantSlot[] } | ParticipantSlot[]>(`/api/tasks/${taskId}/slots`);
+    return Array.isArray(resp) ? resp : resp.slots ?? [];
+  }
+
+  async createSlot(body: CreateParticipantSlotRequest): Promise<ParticipantSlot> {
+    return this.fetch<ParticipantSlot>(`/api/tasks/${body.task_id}/slots`, {
+      method: "POST", body: JSON.stringify(body),
+    });
+  }
+
+  async listExecutionsByTask(taskId: string): Promise<Execution[]> {
+    const resp = await this.fetch<{ executions: Execution[] } | Execution[]>(`/api/tasks/${taskId}/executions`);
+    return Array.isArray(resp) ? resp : resp.executions ?? [];
+  }
+
+  async listArtifactsByTask(taskId: string): Promise<Artifact[]> {
+    const resp = await this.fetch<{ artifacts: Artifact[] } | Artifact[]>(`/api/tasks/${taskId}/artifacts`);
+    return Array.isArray(resp) ? resp : resp.artifacts ?? [];
+  }
+
+  async createReview(body: CreateReviewRequest): Promise<Review> {
+    return this.fetch<Review>(`/api/artifacts/${body.artifact_id}/reviews`, {
+      method: "POST", body: JSON.stringify(body),
+    });
+  }
+
+  async listReviewsForArtifact(artifactId: string): Promise<Review[]> {
+    const resp = await this.fetch<{ reviews: Review[] } | Review[]>(`/api/artifacts/${artifactId}/reviews`);
+    return Array.isArray(resp) ? resp : resp.reviews ?? [];
   }
 }
