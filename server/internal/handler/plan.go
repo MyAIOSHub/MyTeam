@@ -12,23 +12,27 @@ import (
 )
 
 // PlanResponse is the JSON response for a plan.
+//
+// TODO(plan5-d): the legacy "steps" JSONB column was dropped in migration
+// 059. Tasks are now first-class rows with their own surface; the plan
+// response will gain a "tasks" field in Batch D once /api/plans is wired
+// against the new Task / Slot model.
 type PlanResponse struct {
-	ID             string          `json:"id"`
-	WorkspaceID    string          `json:"workspace_id"`
-	Title          string          `json:"title"`
-	Description    *string         `json:"description"`
-	SourceType     *string         `json:"source_type"`
-	SourceRefID    *string         `json:"source_ref_id"`
-	Constraints    *string         `json:"constraints"`
-	ExpectedOutput *string         `json:"expected_output"`
-	Steps          json.RawMessage `json:"steps"`
-	CreatedBy      string          `json:"created_by"`
-	CreatedAt      string          `json:"created_at"`
-	UpdatedAt      string          `json:"updated_at"`
-	ApprovalStatus string          `json:"approval_status"`
-	ApprovedBy     *string         `json:"approved_by"`
-	ApprovedAt     *string         `json:"approved_at"`
-	ProjectID      *string         `json:"project_id"`
+	ID             string  `json:"id"`
+	WorkspaceID    string  `json:"workspace_id"`
+	Title          string  `json:"title"`
+	Description    *string `json:"description"`
+	SourceType     *string `json:"source_type"`
+	SourceRefID    *string `json:"source_ref_id"`
+	Constraints    *string `json:"constraints"`
+	ExpectedOutput *string `json:"expected_output"`
+	CreatedBy      string  `json:"created_by"`
+	CreatedAt      string  `json:"created_at"`
+	UpdatedAt      string  `json:"updated_at"`
+	ApprovalStatus string  `json:"approval_status"`
+	ApprovedBy     *string `json:"approved_by"`
+	ApprovedAt     *string `json:"approved_at"`
+	ProjectID      *string `json:"project_id"`
 }
 
 func planToResponse(p db.Plan) PlanResponse {
@@ -41,7 +45,6 @@ func planToResponse(p db.Plan) PlanResponse {
 		SourceRefID:    uuidToPtr(p.SourceRefID),
 		Constraints:    textToPtr(p.Constraints),
 		ExpectedOutput: textToPtr(p.ExpectedOutput),
-		Steps:          p.Steps,
 		CreatedBy:      uuidToString(p.CreatedBy),
 		CreatedAt:      timestampToString(p.CreatedAt),
 		UpdatedAt:      timestampToString(p.UpdatedAt),
@@ -52,14 +55,20 @@ func planToResponse(p db.Plan) PlanResponse {
 	}
 }
 
+// CreatePlanRequest is the JSON body for POST /api/plans.
+//
+// TODO(plan5-d): the request used to accept inline "steps" JSONB, which
+// became Plan.steps and then workflow_step rows. With the legacy column
+// dropped, the request now creates a plan shell only — Tasks must be
+// created via the Task API. This will be revisited in Batch D once the
+// chat-driven plan flow is reworked.
 type CreatePlanRequest struct {
-	Title          string          `json:"title"`
-	Description    *string         `json:"description"`
-	SourceType     *string         `json:"source_type"`
-	SourceRefID    *string         `json:"source_ref_id"`
-	Constraints    *string         `json:"constraints"`
-	ExpectedOutput *string         `json:"expected_output"`
-	Steps          json.RawMessage `json:"steps"`
+	Title          string  `json:"title"`
+	Description    *string `json:"description"`
+	SourceType     *string `json:"source_type"`
+	SourceRefID    *string `json:"source_ref_id"`
+	Constraints    *string `json:"constraints"`
+	ExpectedOutput *string `json:"expected_output"`
 }
 
 func (h *Handler) CreatePlan(w http.ResponseWriter, r *http.Request) {
@@ -79,11 +88,6 @@ func (h *Handler) CreatePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	steps := req.Steps
-	if steps == nil {
-		steps = []byte("[]")
-	}
-
 	plan, err := h.Queries.CreatePlan(r.Context(), db.CreatePlanParams{
 		WorkspaceID:    parseUUID(workspaceID),
 		Title:          req.Title,
@@ -92,7 +96,6 @@ func (h *Handler) CreatePlan(w http.ResponseWriter, r *http.Request) {
 		SourceRefID:    optionalUUID(req.SourceRefID),
 		Constraints:    ptrToText(req.Constraints),
 		ExpectedOutput: ptrToText(req.ExpectedOutput),
-		Steps:          steps,
 		CreatedBy:      parseUUID(userID),
 	})
 	if err != nil {

@@ -1,5 +1,10 @@
 package handler
 
+// TODO(plan5): Project response shape will be rewritten in Batch D once
+// Task/Slot/Execution surfaces stabilize. The snapshot/retry_count fields
+// referenced previously have been dropped from the database in migration
+// 059 and from the Plan/ProjectVersion/ProjectRun sqlc models.
+
 import (
 	"encoding/json"
 	"log/slog"
@@ -31,21 +36,27 @@ type ProjectResponse struct {
 }
 
 // ProjectVersionResponse is the JSON response for a project version.
+//
+// TODO(plan5): plan_snapshot and workflow_snapshot were dropped in
+// migration 059. Versions will be rebuilt around the Task/Slot/Execution
+// surface in Batch D.
 type ProjectVersionResponse struct {
-	ID               string          `json:"id"`
-	ProjectID        string          `json:"project_id"`
-	ParentVersionID  *string         `json:"parent_version_id"`
-	VersionNumber    int32           `json:"version_number"`
-	BranchName       *string         `json:"branch_name"`
-	ForkReason       *string         `json:"fork_reason"`
-	PlanSnapshot     json.RawMessage `json:"plan_snapshot,omitempty"`
-	WorkflowSnapshot json.RawMessage `json:"workflow_snapshot,omitempty"`
-	VersionStatus    string          `json:"version_status"`
-	CreatedBy        *string         `json:"created_by"`
-	CreatedAt        string          `json:"created_at"`
+	ID              string  `json:"id"`
+	ProjectID       string  `json:"project_id"`
+	ParentVersionID *string `json:"parent_version_id"`
+	VersionNumber   int32   `json:"version_number"`
+	BranchName      *string `json:"branch_name"`
+	ForkReason      *string `json:"fork_reason"`
+	VersionStatus   string  `json:"version_status"`
+	CreatedBy       *string `json:"created_by"`
+	CreatedAt       string  `json:"created_at"`
 }
 
 // ProjectRunResponse is the JSON response for a project run.
+//
+// TODO(plan5): retry_count was dropped from project_run in migration 059.
+// step_logs / output_refs may also be replaced by execution-level surfaces
+// in Batch D.
 type ProjectRunResponse struct {
 	ID            string          `json:"id"`
 	PlanID        string          `json:"plan_id"`
@@ -56,7 +67,6 @@ type ProjectRunResponse struct {
 	StepLogs      json.RawMessage `json:"step_logs"`
 	OutputRefs    json.RawMessage `json:"output_refs"`
 	FailureReason *string         `json:"failure_reason"`
-	RetryCount    int32           `json:"retry_count"`
 	CreatedAt     string          `json:"created_at"`
 }
 

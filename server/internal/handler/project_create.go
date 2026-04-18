@@ -29,11 +29,15 @@ type CreateProjectFromChatRequest struct {
 }
 
 // CreateProjectFromChatResponse is the response for project creation from chat.
+//
+// TODO(plan5-c4): the workflow field has been dropped along with the legacy
+// workflow tables. Once PlanGenerator emits Task + Slot drafts (Batch C4),
+// this response will gain a top-level "tasks" field describing the created
+// Task rows and their participant slots.
 type CreateProjectFromChatResponse struct {
-	Project  ProjectResponse         `json:"project"`
-	Plan     *CreateFromChatPlanResp `json:"plan"`
-	Workflow *WorkflowResponse       `json:"workflow,omitempty"`
-	Channel  map[string]any          `json:"channel"`
+	Project ProjectResponse         `json:"project"`
+	Plan    *CreateFromChatPlanResp `json:"plan"`
+	Channel map[string]any          `json:"channel"`
 }
 
 // CreateFromChatPlanResp is a plan response with additional project-specific fields.
@@ -220,7 +224,6 @@ func (h *Handler) CreateProjectFromChat(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Step 4: Create Plan record
-	stepsJSON, _ := json.Marshal(generatedPlan.Steps)
 	assignedAgentsJSON := buildAssignedAgentsJSON(generatedPlan.Steps)
 
 	plan, err := h.Queries.CreatePlan(ctx, db.CreatePlanParams{
@@ -230,7 +233,6 @@ func (h *Handler) CreateProjectFromChat(w http.ResponseWriter, r *http.Request) 
 		SourceType:     strToText("chat"),
 		Constraints:    strToText(generatedPlan.Constraints),
 		ExpectedOutput: strToText(""),
-		Steps:          stepsJSON,
 		CreatedBy:      parseUUID(userID),
 	})
 	if err != nil {
@@ -239,43 +241,15 @@ func (h *Handler) CreateProjectFromChat(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Step 5: Create Workflow from plan
-	dagJSON := buildWorkflowDAG(generatedPlan.Steps)
-	wf, err := h.Queries.CreateWorkflow(ctx, db.CreateWorkflowParams{
-		PlanID:      plan.ID,
-		WorkspaceID: parseUUID(workspaceID),
-		Title:       generatedPlan.Title,
-		Status:      "draft",
-		Type:        scheduleType,
-		CronExpr:    ptrToText(req.CronExpr),
-		Dag:         dagJSON,
-		CreatedBy:   parseUUID(userID),
-	})
-	if err != nil {
-		slog.Error("failed to create workflow from plan", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to create workflow")
-		return
-	}
-
-	// Create workflow steps from plan steps
-	for _, step := range generatedPlan.Steps {
-		skills := step.RequiredSkills
-		if skills == nil {
-			skills = []string{}
-		}
-
-		_, stepErr := h.Queries.CreateWorkflowStep(ctx, db.CreateWorkflowStepParams{
-			WorkflowID:       wf.ID,
-			StepOrder:        int32(step.Order),
-			Description:      step.Description,
-			AgentID:          optionalUUID(&step.AssignedAgentID),
-			FallbackAgentIds: nil,
-			RequiredSkills:   skills,
-		})
-		if stepErr != nil {
-			slog.Warn("failed to create workflow step", "step_order", step.Order, "error", stepErr)
-		}
-	}
+	// TODO(plan5-c4): PlanGenerator currently still emits "Steps" but the
+	// downstream Workflow/WorkflowStep tables have been dropped (migration
+	// 059). Once PlanGeneratorService is rewritten to return Task + Slot
+	// drafts, this block will create one Task per draft and one
+	// ParticipantSlot per assignee via h.Queries.CreateTask /
+	// h.Queries.CreateParticipantSlot. For now the steps are discarded and
+	// the endpoint returns a Plan with no Tasks attached — Tasks must be
+	// created via the Task API directly.
+	_ = generatedPlan.Steps
 
 	// Step 6: Auto-create project channel
 	ch, err := h.createProjectChannel(r, workspaceID, userID, req.Title)
@@ -357,26 +331,21 @@ func (h *Handler) CreateProjectFromChat(w http.ResponseWriter, r *http.Request) 
 		ApprovalStatus: "draft",
 	}
 
-	wfResp := workflowToResponse(wf)
-
 	resp := CreateProjectFromChatResponse{
-		Project:  projectResp,
-		Plan:     planResp,
-		Workflow: &wfResp,
-		Channel:  channelToResponse(ch),
+		Project: projectResp,
+		Plan:    planResp,
+		Channel: channelToResponse(ch),
 	}
 
 	// Step 10: Broadcast event
 	h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{
-		"project":     projectResp,
-		"plan_id":     uuidToString(plan.ID),
-		"workflow_id": uuidToString(wf.ID),
+		"project": projectResp,
+		"plan_id": uuidToString(plan.ID),
 	})
 
 	slog.Info("project created from chat context",
 		"title", req.Title,
 		"plan_id", uuidToString(plan.ID),
-		"workflow_id", uuidToString(wf.ID),
 		"channel_id", channelIDStr,
 		"source_refs", len(req.SourceRefs),
 		"agents", len(req.AgentIDs),
@@ -471,27 +440,6 @@ func stringSliceFromIdentityCardKey(raw []byte, key string) []string {
 	return out
 }
 
-// buildWorkflowDAG constructs a simple DAG JSON from plan steps.
-func buildWorkflowDAG(steps []service.PlanStep) json.RawMessage {
-	type dagNode struct {
-		Order       int    `json:"order"`
-		Description string `json:"description"`
-		DependsOn   []int  `json:"depends_on"`
-	}
-
-	nodes := make([]dagNode, len(steps))
-	for i, step := range steps {
-		deps := step.DependsOn
-		if deps == nil {
-			deps = []int{}
-		}
-		nodes[i] = dagNode{
-			Order:       step.Order,
-			Description: step.Description,
-			DependsOn:   deps,
-		}
-	}
-
-	data, _ := json.Marshal(nodes)
-	return data
-}
+// TODO(plan5-c4): buildWorkflowDAG was removed when the legacy
+// workflow tables were dropped. The Task / Slot / Execution surface
+// will replace its responsibilities in Batch C4/D.

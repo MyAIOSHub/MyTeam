@@ -409,21 +409,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				})
 			})
 
-			// Workflows
-			r.Route("/api/workflows", func(r chi.Router) {
-				r.Post("/", h.CreateWorkflow)
-				r.Get("/", h.ListWorkflows)
-				r.Route("/{workflowID}", func(r chi.Router) {
-					r.Get("/", h.GetWorkflow)
-					r.Patch("/status", h.UpdateWorkflowStatus)
-					r.Patch("/dag", h.UpdateWorkflowDAG)
-					r.Delete("/", h.DeleteWorkflow)
-					r.Get("/steps", h.ListWorkflowSteps)
-					r.Post("/start", h.StartWorkflow)
-					r.Post("/steps/{stepID}/retry", h.RetryWorkflowStep)
-					r.Patch("/steps/{stepID}/agent", h.ReplaceStepAgent)
-				})
-			})
+			// TODO(plan5): Workflow API replaced by Task API in Batch D.
+			// The legacy /api/workflows routes have been removed; the
+			// equivalent surface will be built on top of the new Task /
+			// Slot / Execution model.
 
 			// Triggers (AgentMesh integration)
 			r.Post("/api/triggers/check-mentions", h.CheckMentions)
