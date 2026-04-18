@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -181,6 +182,30 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 	return token.SignedString(auth.JWTSecret())
 }
 
+// ensurePersonalAgentInAllWorkspaces creates a personal agent for the user in
+// every workspace they belong to. Idempotent — EnsurePersonalAgent returns the
+// existing row if one is already there. Best-effort: per-workspace failures are
+// logged and skipped so a partial outage doesn't block sign-in.
+func (h *Handler) ensurePersonalAgentInAllWorkspaces(ctx context.Context, user db.User) {
+	workspaces, err := h.Queries.ListWorkspaces(ctx, user.ID)
+	if err != nil {
+		slog.Warn("auto-provision personal agent: list workspaces failed",
+			"user_id", uuidToString(user.ID),
+			"error", err,
+		)
+		return
+	}
+	for _, ws := range workspaces {
+		if _, err := service.EnsurePersonalAgent(ctx, h.Queries, ws.ID, user.ID, user.Name); err != nil {
+			slog.Warn("auto-provision personal agent failed",
+				"workspace_id", uuidToString(ws.ID),
+				"user_id", uuidToString(user.ID),
+				"error", err,
+			)
+		}
+	}
+}
+
 func (h *Handler) findOrCreateUser(ctx context.Context, email string) (db.User, error) {
 	user, err := h.Queries.GetUserByEmail(ctx, email)
 	if err != nil {
@@ -301,6 +326,17 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to provision workspace")
 		return
 	}
+
+	// Auto-provision a personal agent in every workspace the user belongs to.
+	// Run async with a detached context so we don't pay N×(SQL+SDK) latency on
+	// the login hot path. Best-effort: a failure here shouldn't block sign-in.
+	go func(u db.User) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		slog.Info("auto-provision personal agent: start", "user_id", uuidToString(u.ID))
+		h.ensurePersonalAgentInAllWorkspaces(ctx, u)
+		slog.Info("auto-provision personal agent: done", "user_id", uuidToString(u.ID))
+	}(user)
 
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
