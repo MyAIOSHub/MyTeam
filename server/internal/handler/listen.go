@@ -48,13 +48,13 @@ func (h *Handler) Listen(w http.ResponseWriter, r *http.Request) {
 			}
 		} else if agentID != "" {
 			msgs, err := h.Queries.ListDMMessages(r.Context(), db.ListDMMessagesParams{
-				WorkspaceID:   parseUUID(resolveWorkspaceID(r)),
-				SenderID:      parseUUID(agentID),
-				SenderType:    "member",
-				RecipientID:   parseUUID(agentID),
-				RecipientType: strToText("agent"),
-				Limit:         10,
-				Offset:        0,
+				WorkspaceID: parseUUID(resolveWorkspaceID(r)),
+				SelfID:      parseUUID(agentID),
+				SelfType:    "member",
+				PeerID:      parseUUID(agentID),
+				PeerType:    strToText("agent"),
+				LimitCount:  10,
+				OffsetCount: 0,
 			})
 			if err == nil {
 				for _, m := range msgs {

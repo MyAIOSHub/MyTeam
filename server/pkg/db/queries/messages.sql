@@ -10,11 +10,17 @@ SELECT * FROM message WHERE id = $1;
 SELECT * FROM message WHERE channel_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3;
 
 -- name: ListDMMessages :many
+-- Returns messages exchanged between a self actor (user/member) and a peer
+-- actor that may be either a member or an agent. Pass `peer_type` so the
+-- recipient_type filter matches the actual rows.
 SELECT * FROM message
-WHERE workspace_id = $1
-  AND ((sender_id = $2 AND sender_type = $3 AND recipient_id = $4 AND recipient_type = $5)
-    OR (sender_id = $4 AND sender_type = $5 AND recipient_id = $2 AND recipient_type = $3))
-ORDER BY created_at ASC LIMIT $6 OFFSET $7;
+WHERE workspace_id = @workspace_id
+  AND ((sender_id = @self_id AND sender_type = @self_type
+        AND recipient_id = @peer_id AND recipient_type = @peer_type)
+    OR (sender_id = @peer_id AND sender_type = @peer_type
+        AND recipient_id = @self_id AND recipient_type = @self_type))
+ORDER BY created_at ASC
+LIMIT @limit_count OFFSET @offset_count;
 
 -- name: UpdateMessageStatus :exec
 UPDATE message SET status = $2, updated_at = NOW() WHERE id = $1;
