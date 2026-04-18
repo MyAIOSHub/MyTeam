@@ -356,10 +356,8 @@ func (s *SchedulerService) HandleTaskCompletion(ctx context.Context, taskID, exe
 //     retries on it yet).
 //  2. Else if a fallback agent is available → switch to it and reset the
 //     retry counter, then re-ScheduleTask.
-//  3. Else mark the task needs_attention and persist the error message.
-//
-// TODO(plan5): create an inbox notification for the task owner when we
-// fall through to needs_attention. Wired in a follow-up batch.
+//  3. Else mark the task needs_attention, persist the error message, and
+//     notify the task owner via inbox so a human can intervene.
 func (s *SchedulerService) HandleTaskFailure(ctx context.Context, taskID, executionID uuid.UUID, errorMsg string) error {
 	_ = executionID // reserved for future per-execution audit; current path acts on Task.
 	task, err := s.Q.GetTask(ctx, toPgUUID(taskID))
@@ -427,7 +425,7 @@ func (s *SchedulerService) HandleTaskFailure(ctx context.Context, taskID, execut
 		return fmt.Errorf("set task error: %w", err)
 	}
 	s.publishTaskStatusChange(ctx, task, TaskStatusNeedsAttention)
-	// TODO(plan5): create an inbox notification for the task owner.
+	s.notifyTaskAttention(ctx, task, errorMsg)
 	return nil
 }
 

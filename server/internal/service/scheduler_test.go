@@ -566,6 +566,61 @@ func TestHandleTaskFailure_FallbackResetsRetryBudget(t *testing.T) {
 	}
 }
 
+// TestHandleTaskFailure_NeedsAttentionNotifiesOwner verifies that when
+// HandleTaskFailure exhausts retries and has no fallback, it not only parks
+// the task in needs_attention but also creates an inbox notification for
+// the agent's owner (project §10.6 — replaces the TODOs in HandleTaskFailure).
+func TestHandleTaskFailure_NeedsAttentionNotifiesOwner(t *testing.T) {
+	q := testDB(t)
+	env := setupSchedEnv(t, q)
+	svc := makeSchedulerService(q)
+	ctx := context.Background()
+
+	task := makeSchedTask(t, q, env, "no-fallback", nil, env.AgentID)
+	if err := svc.ScheduleRun(ctx, pgxToUUID(t, env.PlanID), pgxToUUID(t, env.RunID)); err != nil {
+		t.Fatalf("ScheduleRun: %v", err)
+	}
+
+	// max_retries=2 + no fallback → 3 failures (1 initial budget then 2
+	// retries) park the task in needs_attention.
+	failOnce := func() {
+		execs, err := q.ListExecutionsByTask(ctx, task.ID)
+		if err != nil || len(execs) == 0 {
+			t.Fatalf("expected execution: err=%v len=%d", err, len(execs))
+		}
+		if err := svc.HandleTaskFailure(ctx,
+			pgxToUUID(t, task.ID),
+			pgxToUUID(t, execs[0].ID),
+			"agent error",
+		); err != nil {
+			t.Fatalf("HandleTaskFailure: %v", err)
+		}
+	}
+	failOnce()
+	failOnce()
+	failOnce()
+
+	got, err := q.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.Status != TaskStatusNeedsAttention {
+		t.Fatalf("status: want needs_attention, got %s", got.Status)
+	}
+
+	pool := openTestPool(t)
+	var inboxCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM inbox_item
+		WHERE task_id = $1 AND type = 'task_attention_needed'
+	`, task.ID).Scan(&inboxCount); err != nil {
+		t.Fatalf("count inbox: %v", err)
+	}
+	if inboxCount == 0 {
+		t.Fatalf("expected an inbox_item after retries exhausted, got 0")
+	}
+}
+
 // TestHandleTaskTimeout_RetryAction (default) follows the existing
 // HandleTaskFailure path: bumps current_retry and re-queues the task.
 func TestHandleTaskTimeout_RetryAction(t *testing.T) {
