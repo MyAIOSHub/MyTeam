@@ -486,45 +486,91 @@ func (s *SchedulerService) HandleTaskTimeout(ctx context.Context, taskID uuid.UU
 	}
 }
 
-// notifyTaskAttention writes an inbox item targeted at the task owner so a
-// human knows the task is stuck. Best-effort: errors are logged but do not
-// fail the caller, since we have already updated task.status to
-// needs_attention by this point and that's the primary signal.
+// notifyTaskAttention writes inbox items so a human knows the task is stuck.
+// Best-effort: errors are logged but do not fail the caller, since we have
+// already updated task.status to needs_attention by this point and that's
+// the primary signal.
 //
-// The recipient is derived from task.actual_agent_id → agent.owner_id; when
-// either is missing the inbox row is skipped (we have no one to notify).
+// Recipient resolution (first non-empty wins):
+//  1. task.actual_agent_id → agent.owner_id (user-owned agents).
+//  2. task.run_id → project_run.project_id → project.creator_owner_id
+//     (system agents have no owner, so we fall back to the project creator).
+//  3. workspace owners + admins (no project link, or project lookup failed).
+//
+// Step 3 fans out: every admin gets their own inbox row.
 func (s *SchedulerService) notifyTaskAttention(ctx context.Context, task db.Task, reason string) {
-	if !task.ActualAgentID.Valid {
-		return
-	}
-	agent, err := s.Q.GetAgent(ctx, task.ActualAgentID)
-	if err != nil {
-		slog.Warn("scheduler: load agent for inbox notification failed",
-			"task", task.ID, "agent", task.ActualAgentID, "err", err)
-		return
-	}
-	if !agent.OwnerID.Valid {
-		// System agents have no owner — nothing to notify.
-		return
-	}
-
 	body := reason
 	if body == "" {
 		body = "Task requires attention"
 	}
+	title := fmt.Sprintf("Task needs attention: %s", task.Title)
+
+	// 1) Try the agent's owner.
+	if task.ActualAgentID.Valid {
+		agent, err := s.Q.GetAgent(ctx, task.ActualAgentID)
+		if err != nil {
+			slog.Warn("scheduler: load agent for inbox notification failed",
+				"task", task.ID, "agent", task.ActualAgentID, "err", err)
+		} else if agent.OwnerID.Valid {
+			s.writeAttentionInbox(ctx, task, agent.OwnerID, title, body)
+			return
+		}
+	}
+
+	// 2) Fall back to the project creator (per-project owner).
+	if task.RunID.Valid {
+		run, err := s.Q.GetProjectRun(ctx, task.RunID)
+		if err != nil {
+			slog.Warn("scheduler: load project_run for inbox fallback failed",
+				"task", task.ID, "run", task.RunID, "err", err)
+		} else {
+			project, err := s.Q.GetProject(ctx, run.ProjectID)
+			if err != nil {
+				slog.Warn("scheduler: load project for inbox fallback failed",
+					"task", task.ID, "project", run.ProjectID, "err", err)
+			} else if project.CreatorOwnerID.Valid {
+				s.writeAttentionInbox(ctx, task, project.CreatorOwnerID, title, body)
+				return
+			}
+		}
+	}
+
+	// 3) Last resort: notify every workspace owner/admin so something with
+	// human eyes on it sees the parked task.
+	admins, err := s.Q.ListWorkspaceAdmins(ctx, task.WorkspaceID)
+	if err != nil {
+		slog.Warn("scheduler: list workspace admins for inbox fallback failed",
+			"task", task.ID, "workspace", task.WorkspaceID, "err", err)
+		return
+	}
+	if len(admins) == 0 {
+		slog.Warn("scheduler: no recipient found for task_attention_needed inbox",
+			"task", task.ID, "workspace", task.WorkspaceID)
+		return
+	}
+	for _, m := range admins {
+		s.writeAttentionInbox(ctx, task, m.UserID, title, body)
+	}
+}
+
+// writeAttentionInbox is the shared writer for notifyTaskAttention so the
+// CreateTaskAttentionInboxItem payload stays in one place. Errors are
+// logged and swallowed because the caller treats notification as
+// best-effort.
+func (s *SchedulerService) writeAttentionInbox(ctx context.Context, task db.Task, recipient pgtype.UUID, title, body string) {
 	if _, err := s.Q.CreateTaskAttentionInboxItem(ctx, db.CreateTaskAttentionInboxItemParams{
 		WorkspaceID:    task.WorkspaceID,
-		RecipientID:    agent.OwnerID,
+		RecipientID:    recipient,
 		RecipientType:  "member",
 		Type:           "task_attention_needed",
 		Severity:       "warning",
-		Title:          fmt.Sprintf("Task needs attention: %s", task.Title),
+		Title:          title,
 		Body:           toPgNullText(body),
 		ActionRequired: true,
 		TaskID:         task.ID,
 	}); err != nil {
 		slog.Warn("scheduler: create inbox notification failed",
-			"task", task.ID, "owner", agent.OwnerID, "err", err)
+			"task", task.ID, "recipient", recipient, "err", err)
 	}
 }
 

@@ -755,3 +755,175 @@ func TestCheckRunCompletion_NilRunID_NoOp(t *testing.T) {
 		t.Fatalf("expected nil err for empty run id, got %v", err)
 	}
 }
+
+// TestHandleTaskTimeout_MissingAction verifies that a task whose
+// timeout_rule has an empty action string falls through to the retry path
+// (default branch in HandleTaskTimeout). Mirrors the production safety net
+// where unparseable / missing actions degrade to retry rather than
+// silently dropping the timeout.
+func TestHandleTaskTimeout_MissingAction(t *testing.T) {
+	q := testDB(t)
+	env := setupSchedEnv(t, q)
+	svc := makeSchedulerService(q)
+	ctx := context.Background()
+
+	task, err := q.CreateTask(ctx, db.CreateTaskParams{
+		PlanID:            env.PlanID,
+		RunID:             env.RunID,
+		WorkspaceID:       env.WorkspaceID,
+		Title:             "timeout-missing-action",
+		Description:       pgtype.Text{String: "empty action -> retry", Valid: true},
+		StepOrder:         pgtype.Int4{Int32: 0, Valid: true},
+		PrimaryAssigneeID: env.AgentID,
+		// action explicitly empty so the empty-action branch is exercised.
+		TimeoutRule: []byte(`{"max_duration_seconds":1800,"action":""}`),
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := svc.ScheduleRun(ctx, pgxToUUID(t, env.PlanID), pgxToUUID(t, env.RunID)); err != nil {
+		t.Fatalf("ScheduleRun: %v", err)
+	}
+
+	if err := svc.HandleTaskTimeout(ctx, pgxToUUID(t, task.ID)); err != nil {
+		t.Fatalf("HandleTaskTimeout: %v", err)
+	}
+
+	got, err := q.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.CurrentRetry != 1 {
+		t.Fatalf("current_retry: want 1 (retry path), got %d", got.CurrentRetry)
+	}
+	if got.Status != TaskStatusQueued {
+		t.Fatalf("status: want queued (retry path), got %s", got.Status)
+	}
+}
+
+// TestHandleTaskTimeout_UnknownAction verifies that an unrecognized
+// timeout action ("bogus") also falls through to the retry path. This
+// keeps unknown policies from silently dropping timeouts.
+func TestHandleTaskTimeout_UnknownAction(t *testing.T) {
+	q := testDB(t)
+	env := setupSchedEnv(t, q)
+	svc := makeSchedulerService(q)
+	ctx := context.Background()
+
+	task, err := q.CreateTask(ctx, db.CreateTaskParams{
+		PlanID:            env.PlanID,
+		RunID:             env.RunID,
+		WorkspaceID:       env.WorkspaceID,
+		Title:             "timeout-unknown-action",
+		Description:       pgtype.Text{String: "unknown action -> retry", Valid: true},
+		StepOrder:         pgtype.Int4{Int32: 0, Valid: true},
+		PrimaryAssigneeID: env.AgentID,
+		TimeoutRule:       []byte(`{"max_duration_seconds":1800,"action":"bogus"}`),
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := svc.ScheduleRun(ctx, pgxToUUID(t, env.PlanID), pgxToUUID(t, env.RunID)); err != nil {
+		t.Fatalf("ScheduleRun: %v", err)
+	}
+
+	if err := svc.HandleTaskTimeout(ctx, pgxToUUID(t, task.ID)); err != nil {
+		t.Fatalf("HandleTaskTimeout: %v", err)
+	}
+
+	got, err := q.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.CurrentRetry != 1 {
+		t.Fatalf("current_retry: want 1 (retry path), got %d", got.CurrentRetry)
+	}
+	if got.Status != TaskStatusQueued {
+		t.Fatalf("status: want queued (retry path), got %s", got.Status)
+	}
+}
+
+// TestNotifyTaskAttention_SystemAgent_FallsBackToProjectCreator covers the
+// regression Codex flagged: when a needs_attention task is assigned to a
+// system agent (owner_id IS NULL), notifyTaskAttention used to bail out
+// silently. It now falls back to the project creator (per project.run).
+func TestNotifyTaskAttention_SystemAgent_FallsBackToProjectCreator(t *testing.T) {
+	q := testDB(t)
+	env := setupSchedEnv(t, q)
+	svc := makeSchedulerService(q)
+	ctx := context.Background()
+
+	// Create a workspace-level system agent (owner_id NULL by definition).
+	sysAgent, err := q.CreateSystemAgent(ctx, db.CreateSystemAgentParams{
+		WorkspaceID: env.WorkspaceID,
+		RuntimeID:   env.RuntimeID,
+	})
+	if err != nil {
+		t.Fatalf("create system agent: %v", err)
+	}
+	if sysAgent.OwnerID.Valid {
+		t.Fatalf("system agent should have NULL owner_id, got %+v", sysAgent.OwnerID)
+	}
+
+	task, err := q.CreateTask(ctx, db.CreateTaskParams{
+		PlanID:            env.PlanID,
+		RunID:             env.RunID,
+		WorkspaceID:       env.WorkspaceID,
+		Title:             "system-agent-escalate",
+		Description:       pgtype.Text{String: "system agent -> needs_attention", Valid: true},
+		StepOrder:         pgtype.Int4{Int32: 0, Valid: true},
+		PrimaryAssigneeID: sysAgent.ID,
+		TimeoutRule:       []byte(`{"max_duration_seconds":1800,"action":"escalate"}`),
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := q.AssignTaskAgent(ctx, db.AssignTaskAgentParams{
+		ID:            task.ID,
+		ActualAgentID: sysAgent.ID,
+	}); err != nil {
+		t.Fatalf("AssignTaskAgent: %v", err)
+	}
+
+	if err := svc.HandleTaskTimeout(ctx, pgxToUUID(t, task.ID)); err != nil {
+		t.Fatalf("HandleTaskTimeout: %v", err)
+	}
+
+	got, err := q.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.Status != TaskStatusNeedsAttention {
+		t.Fatalf("status: want needs_attention, got %s", got.Status)
+	}
+
+	// Confirm an inbox item was created for the project creator (the fallback
+	// recipient), not silently dropped because the agent has no owner.
+	pool := openTestPool(t)
+	rows, err := pool.Query(ctx, `
+		SELECT recipient_id
+		FROM inbox_item
+		WHERE task_id = $1 AND type = 'task_attention_needed'
+	`, task.ID)
+	if err != nil {
+		t.Fatalf("query inbox: %v", err)
+	}
+	defer rows.Close()
+	recipients := []pgtype.UUID{}
+	for rows.Next() {
+		var rid pgtype.UUID
+		if err := rows.Scan(&rid); err != nil {
+			t.Fatalf("scan inbox row: %v", err)
+		}
+		recipients = append(recipients, rid)
+	}
+	if len(recipients) == 0 {
+		t.Fatalf("expected inbox_item for system-agent escalation, got 0")
+	}
+	// Recipient should be the project creator we seeded in setupSchedEnv
+	// (creator_owner_id = MemberID).
+	if recipients[0].Bytes != env.MemberID.Bytes {
+		t.Fatalf("expected recipient=%x (project creator), got %x",
+			env.MemberID.Bytes, recipients[0].Bytes)
+	}
+}
