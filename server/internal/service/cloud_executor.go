@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,6 +20,17 @@ import (
 	"github.com/multica-ai/multica/server/pkg/llmclient"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// BackendFactory builds an agent.Backend from an LLM config. It exists so
+// tests can inject a fake backend without spinning up the real LLM client.
+type BackendFactory func(llmclient.Config) agent.Backend
+
+// defaultBackendFactory wraps agent.NewCloudBackend so production code reaches
+// the real LLM HTTP path. Kept as a package var (not inlined) so the test
+// suite can verify it's the wired-in default.
+var defaultBackendFactory BackendFactory = func(cfg llmclient.Config) agent.Backend {
+	return agent.NewCloudBackend(cfg)
+}
 
 // CloudExecutorService claims and executes tasks for cloud-mode agents.
 //
@@ -37,6 +49,11 @@ type CloudExecutorService struct {
 	TaskService *TaskService
 	Quota       *QuotaService
 	Scheduler   *SchedulerService
+
+	// BackendFactory builds the agent.Backend used by runExecutionAsync. Tests
+	// override it to avoid hitting the real LLM API; production leaves it nil
+	// and the service falls back to defaultBackendFactory.
+	BackendFactory BackendFactory
 }
 
 // NewCloudExecutorService creates a new CloudExecutorService.
@@ -46,13 +63,23 @@ type CloudExecutorService struct {
 // agent_task_queue path is unaffected.
 func NewCloudExecutorService(queries *db.Queries, hub *realtime.Hub, bus *events.Bus, taskService *TaskService, scheduler *SchedulerService) *CloudExecutorService {
 	return &CloudExecutorService{
-		Queries:     queries,
-		Hub:         hub,
-		Bus:         bus,
-		TaskService: taskService,
-		Quota:       NewQuotaService(queries),
-		Scheduler:   scheduler,
+		Queries:        queries,
+		Hub:            hub,
+		Bus:            bus,
+		TaskService:    taskService,
+		Quota:          NewQuotaService(queries),
+		Scheduler:      scheduler,
+		BackendFactory: defaultBackendFactory,
 	}
+}
+
+// backend returns the configured BackendFactory, falling back to the default
+// so callers that mutate s.BackendFactory to nil don't crash.
+func (s *CloudExecutorService) backend(cfg llmclient.Config) agent.Backend {
+	if s.BackendFactory != nil {
+		return s.BackendFactory(cfg)
+	}
+	return defaultBackendFactory(cfg)
 }
 
 // Start subscribes to task:dispatch events and starts a poll loop for pending cloud tasks.
@@ -472,9 +499,8 @@ func (s *CloudExecutorService) pollAndExecuteExecutions(ctx context.Context) {
 // parent poll loop's ctx so a server shutdown cancels new claims but lets
 // in-flight work finish.
 //
-// The Claude Agent SDK invocation is stubbed — the real integration lands in
-// plan5-d3-followup. For now we record a stub result, mark the execution
-// completed, and cascade to the scheduler.
+// The LLM call goes through agent.Backend (built by s.backend), so tests can
+// inject a fake backend without hitting the real LLM HTTP endpoint.
 func (s *CloudExecutorService) runExecutionAsync(parentCtx context.Context, e db.Execution, sessionID, sandboxID string) {
 	_ = parentCtx // intentionally not propagated — see comment above.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -482,9 +508,6 @@ func (s *CloudExecutorService) runExecutionAsync(parentCtx context.Context, e db
 
 	execIDStr := uuidToStringSafe(e.ID)
 
-	// Resolve agent + runtime so we have everything needed for the SDK
-	// invocation (and so a missing FK fails the execution rather than
-	// silently no-op'ing).
 	agentRow, err := s.Queries.GetAgent(ctx, e.AgentID)
 	if err != nil {
 		s.failExecution(ctx, e, fmt.Sprintf("get agent: %v", err))
@@ -495,23 +518,68 @@ func (s *CloudExecutorService) runExecutionAsync(parentCtx context.Context, e db
 		s.failExecution(ctx, e, fmt.Sprintf("get runtime: %v", err))
 		return
 	}
-	_ = agentRow
-	_ = runtime
 
-	// TODO(plan5-d3-followup): integrate Claude Agent SDK here.
-	//   - Build SDK request from e.Payload (task title/description/AC + input
-	//     context refs) and runtime.metadata (LLM config).
-	//   - Call SDK Execute() against sessionID inside sandboxID.
-	//   - Stream messages → optional WS publish.
-	//   - Map SDK result → result map below; capture cost via CompleteExecution
-	//     params.
-	result := map[string]any{
-		"stub":       true,
-		"note":       "CloudExecutorService SDK invocation is stubbed; integration follows in plan5-d3-followup",
-		"session_id": sessionID,
-		"sandbox_id": sandboxID,
+	// Decode the payload SchedulerService.ScheduleTask wrote when it created
+	// this execution row. A malformed payload is fatal — the scheduler is the
+	// only writer, so a parse error means the schema is out of sync.
+	var payload struct {
+		TaskID             string          `json:"task_id"`
+		Title              string          `json:"title"`
+		Description        string          `json:"description"`
+		AcceptanceCriteria string          `json:"acceptance_criteria"`
+		InputContextRefs   json.RawMessage `json:"input_context_refs"`
+	}
+	if len(e.Payload) > 0 {
+		if err := json.Unmarshal(e.Payload, &payload); err != nil {
+			s.failExecution(ctx, e, fmt.Sprintf("parse payload: %v", err))
+			return
+		}
+	}
+	if payload.Title == "" {
+		s.failExecution(ctx, e, "execution payload missing title")
+		return
 	}
 
+	llmCfg := s.buildLLMConfig(runtime)
+	systemPrompt := buildExecutionSystemPrompt(agentRow.Name)
+	prompt := buildExecutionPrompt(payload.Title, payload.Description, payload.AcceptanceCriteria)
+
+	session, err := s.backend(llmCfg).Execute(ctx, prompt, agent.ExecOptions{
+		SystemPrompt:    systemPrompt,
+		ResumeSessionID: sessionID,
+	})
+	if err != nil {
+		s.failExecution(ctx, e, fmt.Sprintf("backend execute: %v", err))
+		return
+	}
+
+	// Drain the message stream. WS streaming is plan5 follow-up — for now
+	// the channel must still be drained or the goroutine inside
+	// CloudBackend.Execute would block forever.
+	for range session.Messages {
+	}
+
+	r := <-session.Result
+	if r.Status != "completed" {
+		errMsg := r.Error
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("execution finished with status %q", r.Status)
+		}
+		s.failExecution(ctx, e, errMsg)
+		return
+	}
+
+	result := map[string]any{
+		"output":      r.Output,
+		"session_id":  sessionID,
+		"sandbox_id":  sandboxID,
+		"duration_ms": r.DurationMs,
+	}
+
+	// Token-level cost capture follows in plan5-d4-followup once
+	// llmclient.Chat surfaces usage stats. Until then we record the result
+	// but leave cost_* unset so the column distinguishes "we don't know" from
+	// a real $0.00 invocation.
 	if err := s.Queries.CompleteExecution(ctx, db.CompleteExecutionParams{
 		ID:     e.ID,
 		Result: marshalResult(result),
@@ -533,6 +601,39 @@ func (s *CloudExecutorService) runExecutionAsync(parentCtx context.Context, e db
 	}
 
 	slog.Info("[cloud-executor] execution completed", "exec", execIDStr)
+}
+
+// buildExecutionSystemPrompt assembles the system prompt sent to the LLM
+// for an execution-table task. Kept as a separate function so prompt tuning
+// is one obvious place rather than buried in the goroutine.
+func buildExecutionSystemPrompt(agentName string) string {
+	return fmt.Sprintf(
+		"You are %s, an AI agent on the Multica platform. Complete the task described below. "+
+			"Respond with the final result in plain text. If the task is unclear or you cannot "+
+			"proceed, say so explicitly so the human reviewer can intervene.",
+		agentName,
+	)
+}
+
+// buildExecutionPrompt formats the task fields into the prompt body. Empty
+// fields are omitted so the LLM doesn't see headings followed by nothing.
+func buildExecutionPrompt(title, description, acceptanceCriteria string) string {
+	var sb strings.Builder
+	sb.WriteString("## Task: ")
+	sb.WriteString(title)
+	sb.WriteString("\n\n")
+	if description != "" {
+		sb.WriteString("### Description\n")
+		sb.WriteString(description)
+		sb.WriteString("\n\n")
+	}
+	if acceptanceCriteria != "" {
+		sb.WriteString("### Acceptance Criteria\n")
+		sb.WriteString(acceptanceCriteria)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString("Complete the task and provide the result.")
+	return sb.String()
 }
 
 // failExecution marks an execution row failed and cascades to

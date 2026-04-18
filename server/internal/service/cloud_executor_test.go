@@ -10,6 +10,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,8 +18,51 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/llmclient"
 )
+
+// fakeBackend stubs agent.Backend so cloud_executor tests don't hit a real
+// LLM endpoint. lastPrompt/lastSystem capture what runExecutionAsync built
+// so tests can assert on prompt construction.
+type fakeBackend struct {
+	mu         sync.Mutex
+	lastPrompt string
+	lastSystem string
+	output     string
+	failErr    string
+}
+
+func (b *fakeBackend) Execute(ctx context.Context, prompt string, opts agent.ExecOptions) (*agent.Session, error) {
+	b.mu.Lock()
+	b.lastPrompt = prompt
+	b.lastSystem = opts.SystemPrompt
+	b.mu.Unlock()
+
+	msgChan := make(chan agent.Message, 1)
+	resChan := make(chan agent.Result, 1)
+	close(msgChan)
+	if b.failErr != "" {
+		resChan <- agent.Result{Status: "failed", Error: b.failErr}
+	} else {
+		out := b.output
+		if out == "" {
+			out = "fake-backend-output"
+		}
+		resChan <- agent.Result{Status: "completed", Output: out, DurationMs: 42}
+	}
+	close(resChan)
+	return &agent.Session{Messages: msgChan, Result: resChan}, nil
+}
+
+// installFakeBackend wires a fakeBackend into the service and returns it so
+// the test can read lastPrompt / lastSystem after the goroutine settles.
+func installFakeBackend(svc *CloudExecutorService, output string) *fakeBackend {
+	fb := &fakeBackend{output: output}
+	svc.BackendFactory = func(_ llmclient.Config) agent.Backend { return fb }
+	return fb
+}
 
 // cloudExecEnv extends schedTestEnv with the bits cloud_executor_test
 // specifically needs (a CloudExecutorService bound to the SchedulerService
@@ -40,6 +84,11 @@ func setupCloudExecEnv(t *testing.T, q *db.Queries) cloudExecEnv {
 	// a real TaskService against the same queries.
 	taskSvc := NewTaskService(q, nil, nil)
 	svc := NewCloudExecutorService(q, nil, nil, taskSvc, scheduler)
+
+	// Default every test to a fake backend so they don't accidentally hit a
+	// real LLM endpoint. Tests that care about the prompt or output can
+	// install their own via installFakeBackend.
+	installFakeBackend(svc, "")
 
 	return cloudExecEnv{
 		schedTestEnv: env,
@@ -118,6 +167,10 @@ func TestPollAndExecuteExecutions_ClaimAndComplete(t *testing.T) {
 	// Generous quota so the gate doesn't interfere.
 	setQuota(t, q, env.WorkspaceID, 100.0, 0.0, 10)
 
+	// Inject a fake backend so the test doesn't need a real LLM endpoint.
+	// The fake echoes a known string we can assert on below.
+	fb := installFakeBackend(env.Svc, "agent did the thing")
+
 	task, exec := seedQueuedExecution(t, q, env, "claim-and-complete")
 
 	env.Svc.pollAndExecuteExecutions(ctx)
@@ -128,13 +181,23 @@ func TestPollAndExecuteExecutions_ClaimAndComplete(t *testing.T) {
 		t.Fatalf("execution status: want completed, got %s", final.Status)
 	}
 
-	// Result should be the stub map we wrote.
 	var result map[string]any
 	if err := json.Unmarshal(final.Result, &result); err != nil {
 		t.Fatalf("unmarshal result: %v", err)
 	}
-	if stub, _ := result["stub"].(bool); !stub {
-		t.Fatalf("expected stub result, got %+v", result)
+	if got, _ := result["output"].(string); got != "agent did the thing" {
+		t.Fatalf("result.output: want backend echo, got %v", result["output"])
+	}
+	if _, ok := result["session_id"].(string); !ok {
+		t.Fatalf("result missing session_id; got %+v", result)
+	}
+
+	// The prompt should reference the seeded title so we know runExecutionAsync
+	// actually parsed the payload SchedulerService wrote.
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	if !strings.Contains(fb.lastPrompt, "claim-and-complete") {
+		t.Fatalf("prompt should include task title; got %q", fb.lastPrompt)
 	}
 
 	// Scheduler.HandleTaskCompletion must have fired — observable via the
