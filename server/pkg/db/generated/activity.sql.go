@@ -124,6 +124,110 @@ func (q *Queries) ListActivities(ctx context.Context, arg ListActivitiesParams) 
 	return items, nil
 }
 
+const listActivityForMember = `-- name: ListActivityForMember :many
+WITH accessible_projects AS (
+    SELECT id FROM project
+    WHERE workspace_id = $1 AND creator_owner_id = $2
+    UNION
+    SELECT c.project_id FROM channel_member cm
+    JOIN channel c ON cm.channel_id = c.id
+    WHERE cm.member_id = $2
+      AND cm.member_type = 'member'
+      AND c.workspace_id = $1
+      AND c.project_id IS NOT NULL
+)
+SELECT al.id, al.workspace_id, al.issue_id, al.actor_type, al.actor_id, al.action, al.details, al.created_at, al.event_type, al.effective_actor_id, al.effective_actor_type, al.real_operator_id, al.real_operator_type, al.related_project_id, al.related_plan_id, al.related_task_id, al.related_slot_id, al.related_execution_id, al.related_channel_id, al.related_thread_id, al.related_agent_id, al.related_runtime_id, al.payload, al.retention_class FROM activity_log al
+WHERE al.workspace_id = $1
+  AND (
+      al.actor_id = $2
+      OR al.related_project_id IN (SELECT id FROM accessible_projects)
+      OR al.related_task_id IN (
+          SELECT t.id FROM task t
+          WHERE t.workspace_id = $1
+            AND t.actual_agent_id IN (
+                SELECT a.id FROM agent a
+                WHERE a.workspace_id = $1 AND a.owner_id = $2
+            )
+      )
+  )
+  AND ($3::uuid IS NULL OR al.related_project_id = $3::uuid)
+  AND ($4::uuid IS NULL OR al.related_task_id = $4::uuid)
+  AND ($5::text IS NULL OR al.event_type LIKE $5::text)
+ORDER BY al.created_at DESC
+LIMIT $7 OFFSET $6
+`
+
+type ListActivityForMemberParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	SelfUserID      pgtype.UUID `json:"self_user_id"`
+	ProjectFilter   pgtype.UUID `json:"project_filter"`
+	TaskFilter      pgtype.UUID `json:"task_filter"`
+	EventTypeFilter pgtype.Text `json:"event_type_filter"`
+	OffsetCount     int32       `json:"offset_count"`
+	LimitCount      int32       `json:"limit_count"`
+}
+
+// PRD §3.4 row-level isolation for non-admin members.
+// A member sees activity_log rows where ANY of:
+//   - actor_id matches the member's own user_id, OR
+//   - related_project_id is a project the member created or joined via channel, OR
+//   - related_task_id belongs to a task whose actual_agent is owned by the member.
+//
+// Optional sqlc.narg filters narrow the result by project_id / task_id / event_type
+// so the same query backs the existing route variants.
+func (q *Queries) ListActivityForMember(ctx context.Context, arg ListActivityForMemberParams) ([]ActivityLog, error) {
+	rows, err := q.db.Query(ctx, listActivityForMember,
+		arg.WorkspaceID,
+		arg.SelfUserID,
+		arg.ProjectFilter,
+		arg.TaskFilter,
+		arg.EventTypeFilter,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ActivityLog{}
+	for rows.Next() {
+		var i ActivityLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Action,
+			&i.Details,
+			&i.CreatedAt,
+			&i.EventType,
+			&i.EffectiveActorID,
+			&i.EffectiveActorType,
+			&i.RealOperatorID,
+			&i.RealOperatorType,
+			&i.RelatedProjectID,
+			&i.RelatedPlanID,
+			&i.RelatedTaskID,
+			&i.RelatedSlotID,
+			&i.RelatedExecutionID,
+			&i.RelatedChannelID,
+			&i.RelatedThreadID,
+			&i.RelatedAgentID,
+			&i.RelatedRuntimeID,
+			&i.Payload,
+			&i.RetentionClass,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActivityLogByEventType = `-- name: ListActivityLogByEventType :many
 SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at, event_type, effective_actor_id, effective_actor_type, real_operator_id, real_operator_type, related_project_id, related_plan_id, related_task_id, related_slot_id, related_execution_id, related_channel_id, related_thread_id, related_agent_id, related_runtime_id, payload, retention_class FROM activity_log
 WHERE workspace_id = $1 AND event_type LIKE $2
