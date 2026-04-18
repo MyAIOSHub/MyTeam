@@ -566,6 +566,131 @@ func TestHandleTaskFailure_FallbackResetsRetryBudget(t *testing.T) {
 	}
 }
 
+// TestHandleTaskTimeout_RetryAction (default) follows the existing
+// HandleTaskFailure path: bumps current_retry and re-queues the task.
+func TestHandleTaskTimeout_RetryAction(t *testing.T) {
+	q := testDB(t)
+	env := setupSchedEnv(t, q)
+	svc := makeSchedulerService(q)
+	ctx := context.Background()
+
+	task := makeSchedTask(t, q, env, "timeout-retry", nil, env.AgentID)
+	if err := svc.ScheduleRun(ctx, pgxToUUID(t, env.PlanID), pgxToUUID(t, env.RunID)); err != nil {
+		t.Fatalf("ScheduleRun: %v", err)
+	}
+
+	// timeout_rule defaults to action=retry, so HandleTaskTimeout should
+	// take the retry branch.
+	if err := svc.HandleTaskTimeout(ctx, pgxToUUID(t, task.ID)); err != nil {
+		t.Fatalf("HandleTaskTimeout: %v", err)
+	}
+
+	got, err := q.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.CurrentRetry != 1 {
+		t.Fatalf("current_retry: want 1, got %d", got.CurrentRetry)
+	}
+	if got.Status != TaskStatusQueued {
+		t.Fatalf("status: want queued, got %s", got.Status)
+	}
+}
+
+// TestHandleTaskTimeout_FailAction marks the task failed without consuming
+// the retry budget.
+func TestHandleTaskTimeout_FailAction(t *testing.T) {
+	q := testDB(t)
+	env := setupSchedEnv(t, q)
+	svc := makeSchedulerService(q)
+	ctx := context.Background()
+
+	task, err := q.CreateTask(ctx, db.CreateTaskParams{
+		PlanID:            env.PlanID,
+		RunID:             env.RunID,
+		WorkspaceID:       env.WorkspaceID,
+		Title:             "timeout-fail",
+		Description:       pgtype.Text{String: "fail action", Valid: true},
+		StepOrder:         pgtype.Int4{Int32: 0, Valid: true},
+		PrimaryAssigneeID: env.AgentID,
+		TimeoutRule:       []byte(`{"max_duration_seconds":1800,"action":"fail"}`),
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if err := svc.HandleTaskTimeout(ctx, pgxToUUID(t, task.ID)); err != nil {
+		t.Fatalf("HandleTaskTimeout: %v", err)
+	}
+
+	got, err := q.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.Status != TaskStatusFailed {
+		t.Fatalf("status: want failed, got %s", got.Status)
+	}
+	if got.CurrentRetry != 0 {
+		t.Fatalf("current_retry should not be incremented on fail action, got %d", got.CurrentRetry)
+	}
+}
+
+// TestHandleTaskTimeout_EscalateAction parks the task in needs_attention and
+// (per T2d) creates an inbox notification for the owner.
+func TestHandleTaskTimeout_EscalateAction(t *testing.T) {
+	q := testDB(t)
+	env := setupSchedEnv(t, q)
+	svc := makeSchedulerService(q)
+	ctx := context.Background()
+
+	task, err := q.CreateTask(ctx, db.CreateTaskParams{
+		PlanID:            env.PlanID,
+		RunID:             env.RunID,
+		WorkspaceID:       env.WorkspaceID,
+		Title:             "timeout-escalate",
+		Description:       pgtype.Text{String: "escalate action", Valid: true},
+		StepOrder:         pgtype.Int4{Int32: 0, Valid: true},
+		PrimaryAssigneeID: env.AgentID,
+		TimeoutRule:       []byte(`{"max_duration_seconds":1800,"action":"escalate"}`),
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	// Pretend the scheduler already assigned the primary — this is required
+	// for the inbox notification path to resolve the task owner.
+	if err := q.AssignTaskAgent(ctx, db.AssignTaskAgentParams{
+		ID:            task.ID,
+		ActualAgentID: env.AgentID,
+	}); err != nil {
+		t.Fatalf("AssignTaskAgent: %v", err)
+	}
+
+	if err := svc.HandleTaskTimeout(ctx, pgxToUUID(t, task.ID)); err != nil {
+		t.Fatalf("HandleTaskTimeout: %v", err)
+	}
+
+	got, err := q.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.Status != TaskStatusNeedsAttention {
+		t.Fatalf("status: want needs_attention, got %s", got.Status)
+	}
+
+	// Confirm the inbox notification was created for the agent owner.
+	pool := openTestPool(t)
+	var inboxCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM inbox_item
+		WHERE task_id = $1 AND type = 'task_attention_needed'
+	`, task.ID).Scan(&inboxCount); err != nil {
+		t.Fatalf("count inbox: %v", err)
+	}
+	if inboxCount == 0 {
+		t.Fatalf("expected an inbox_item for the timeout escalation, got 0")
+	}
+}
+
 // guard: nil run id passed to checkRunCompletion must be a no-op rather
 // than blowing up on the db.UpdateProjectRunStatus call.
 func TestCheckRunCompletion_NilRunID_NoOp(t *testing.T) {
