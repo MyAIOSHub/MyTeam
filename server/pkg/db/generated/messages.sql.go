@@ -314,30 +314,36 @@ func (q *Queries) ListChannelMessages(ctx context.Context, arg ListChannelMessag
 const listDMMessages = `-- name: ListDMMessages :many
 SELECT id, workspace_id, sender_id, sender_type, channel_id, recipient_id, recipient_type, content, content_type, file_id, file_name, file_size, file_content_type, metadata, status, created_at, updated_at, parent_id, type, is_impersonated, reply_expected, thread_id, effective_actor_id, effective_actor_type, real_operator_id, real_operator_type FROM message
 WHERE workspace_id = $1
-  AND ((sender_id = $2 AND sender_type = $3 AND recipient_id = $4 AND recipient_type = $5)
-    OR (sender_id = $4 AND sender_type = $5 AND recipient_id = $2 AND recipient_type = $3))
-ORDER BY created_at ASC LIMIT $6 OFFSET $7
+  AND ((sender_id = $2 AND sender_type = $3
+        AND recipient_id = $4 AND recipient_type = $5)
+    OR (sender_id = $4 AND sender_type = $5
+        AND recipient_id = $2 AND recipient_type = $3))
+ORDER BY created_at ASC
+LIMIT $7 OFFSET $6
 `
 
 type ListDMMessagesParams struct {
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	SenderID      pgtype.UUID `json:"sender_id"`
-	SenderType    string      `json:"sender_type"`
-	RecipientID   pgtype.UUID `json:"recipient_id"`
-	RecipientType pgtype.Text `json:"recipient_type"`
-	Limit         int32       `json:"limit"`
-	Offset        int32       `json:"offset"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SelfID      pgtype.UUID `json:"self_id"`
+	SelfType    string      `json:"self_type"`
+	PeerID      pgtype.UUID `json:"peer_id"`
+	PeerType    pgtype.Text `json:"peer_type"`
+	OffsetCount int32       `json:"offset_count"`
+	LimitCount  int32       `json:"limit_count"`
 }
 
+// Returns messages exchanged between a self actor (user/member) and a peer
+// actor that may be either a member or an agent. Pass `peer_type` so the
+// recipient_type filter matches the actual rows.
 func (q *Queries) ListDMMessages(ctx context.Context, arg ListDMMessagesParams) ([]Message, error) {
 	rows, err := q.db.Query(ctx, listDMMessages,
 		arg.WorkspaceID,
-		arg.SenderID,
-		arg.SenderType,
-		arg.RecipientID,
-		arg.RecipientType,
-		arg.Limit,
-		arg.Offset,
+		arg.SelfID,
+		arg.SelfType,
+		arg.PeerID,
+		arg.PeerType,
+		arg.OffsetCount,
+		arg.LimitCount,
 	)
 	if err != nil {
 		return nil, err

@@ -196,11 +196,23 @@ func (h *Handler) resolveOrCreateThread(ctx context.Context, parentMessageID str
 	return parentUUID
 }
 
-// GET /api/messages?channel_id=X or recipient_id=X
+// GET /api/messages?channel_id=X or recipient_id=X[&peer_type=member|agent]
+//
+// peer_type defaults to "member" for backward compatibility. Pass
+// peer_type=agent when the DM peer is an agent — otherwise the recipient_type
+// filter rejects every row and the conversation appears empty.
 func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	workspaceID := resolveWorkspaceID(r)
 	channelID := r.URL.Query().Get("channel_id")
 	recipientID := r.URL.Query().Get("recipient_id")
+	peerType := r.URL.Query().Get("peer_type")
+	if peerType == "" {
+		peerType = "member"
+	}
+	if peerType != "member" && peerType != "agent" {
+		writeError(w, http.StatusBadRequest, "peer_type must be 'member' or 'agent'")
+		return
+	}
 	limit := queryInt(r, "limit", 50)
 	offset := queryInt(r, "offset", 0)
 
@@ -219,13 +231,13 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		messages, err = h.Queries.ListDMMessages(r.Context(), db.ListDMMessagesParams{
-			WorkspaceID:   parseUUID(workspaceID),
-			SenderID:      parseUUID(senderID),
-			SenderType:    "member",
-			RecipientID:   parseUUID(recipientID),
-			RecipientType: strToText("member"),
-			Limit:         int32(limit),
-			Offset:        int32(offset),
+			WorkspaceID: parseUUID(workspaceID),
+			SelfID:      parseUUID(senderID),
+			SelfType:    "member",
+			PeerID:      parseUUID(recipientID),
+			PeerType:    strToText(peerType),
+			LimitCount:  int32(limit),
+			OffsetCount: int32(offset),
 		})
 	} else {
 		writeError(w, http.StatusBadRequest, "specify channel_id or recipient_id")
