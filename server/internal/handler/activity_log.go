@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -45,9 +46,11 @@ type ActivityLogEntryResponse struct {
 //   ?event_type=foo%  filter by event_type LIKE pattern
 //
 // Pagination via ?limit=N (default 50, max 200) and ?offset=N (default 0).
-// Member-level access only: requires workspace membership. Per-row isolation
-// (admin sees all, member only sees self-actor rows) is a follow-up — see
-// PRD §3.4.
+//
+// Per PRD §3.4 the result set is isolated by role:
+//   - owners/admins see every row in the workspace, subject to the chosen filter
+//   - members only see rows where they are the actor, are a participant on the
+//     related project, or own the agent that ran the related task
 //
 // Note: actor_id filter is intentionally not implemented for MVP — no
 // matching sqlc query exists yet; will be added in a follow-up.
@@ -58,60 +61,92 @@ func (h *Handler) ListActivityLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Member-level access (admin/member isolation is TODO per PRD §3.4).
-	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+
+	pid := r.URL.Query().Get("project_id")
+	tid := r.URL.Query().Get("task_id")
+	etype := r.URL.Query().Get("event_type")
+	if pid == "" && tid == "" && etype == "" {
+		writeError(w, http.StatusBadRequest, "must provide one of: project_id, task_id, event_type")
 		return
 	}
 
 	limit, offset := paginationFromRequest(r, 50, 200)
 	wsUUID := parseUUID(workspaceID)
 
-	if pid := r.URL.Query().Get("project_id"); pid != "" {
-		rows, err := h.Queries.ListActivityLogByProject(r.Context(), db.ListActivityLogByProjectParams{
+	// Owners and admins are not subject to per-row isolation.
+	if roleAllowed(member.Role, "owner", "admin") {
+		rows, err := h.listActivityForAdmin(r, wsUUID, pid, tid, etype, limit, offset)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list activity log")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"entries": activityRowsToResponse(rows)})
+		return
+	}
+
+	// Members get the isolated query — actor self / accessible project / owned agent task.
+	//
+	// Filter-handling divergence vs. the admin path above: the admin path
+	// dispatches to a single per-filter sqlc query (first non-empty filter
+	// wins), whereas the member query is one statement that ANDs every
+	// supplied filter together. This is intentional — admins legitimately
+	// hit each route variant in isolation, while members may pass multiple
+	// filters at once (e.g. project_id + event_type) and we want all of
+	// them to apply on top of the row-level visibility predicate. Keep
+	// both behaviors as-is unless the API contract changes.
+	params := db.ListActivityForMemberParams{
+		WorkspaceID: wsUUID,
+		SelfUserID:  member.UserID,
+		LimitCount:  int32(limit),
+		OffsetCount: int32(offset),
+	}
+	if pid != "" {
+		params.ProjectFilter = parseUUID(pid)
+	}
+	if tid != "" {
+		params.TaskFilter = parseUUID(tid)
+	}
+	if etype != "" {
+		params.EventTypeFilter = pgtype.Text{String: etype, Valid: true}
+	}
+
+	rows, err := h.Queries.ListActivityForMember(r.Context(), params)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list activity log")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": activityRowsToResponse(rows)})
+}
+
+// listActivityForAdmin dispatches to the unfiltered (admin/owner) sqlc queries.
+func (h *Handler) listActivityForAdmin(r *http.Request, wsUUID pgtype.UUID, pid, tid, etype string, limit, offset int) ([]db.ActivityLog, error) {
+	switch {
+	case pid != "":
+		return h.Queries.ListActivityLogByProject(r.Context(), db.ListActivityLogByProjectParams{
 			WorkspaceID: wsUUID,
 			ProjectID:   parseUUID(pid),
 			LimitCount:  int32(limit),
 			OffsetCount: int32(offset),
 		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to list activity log")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"entries": activityRowsToResponse(rows)})
-		return
-	}
-
-	if tid := r.URL.Query().Get("task_id"); tid != "" {
-		rows, err := h.Queries.ListActivityLogByTask(r.Context(), db.ListActivityLogByTaskParams{
+	case tid != "":
+		return h.Queries.ListActivityLogByTask(r.Context(), db.ListActivityLogByTaskParams{
 			WorkspaceID: wsUUID,
 			TaskID:      parseUUID(tid),
 			LimitCount:  int32(limit),
 			OffsetCount: int32(offset),
 		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to list activity log")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"entries": activityRowsToResponse(rows)})
-		return
-	}
-
-	if etype := r.URL.Query().Get("event_type"); etype != "" {
-		rows, err := h.Queries.ListActivityLogByEventType(r.Context(), db.ListActivityLogByEventTypeParams{
+	default:
+		return h.Queries.ListActivityLogByEventType(r.Context(), db.ListActivityLogByEventTypeParams{
 			WorkspaceID:      wsUUID,
 			EventTypePattern: etype,
 			LimitCount:       int32(limit),
 			OffsetCount:      int32(offset),
 		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to list activity log")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"entries": activityRowsToResponse(rows)})
-		return
 	}
-
-	writeError(w, http.StatusBadRequest, "must provide one of: project_id, task_id, event_type")
 }
 
 // activityRowsToResponse maps generated ActivityLog rows to the response shape.

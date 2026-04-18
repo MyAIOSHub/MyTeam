@@ -235,3 +235,250 @@ func TestListActivityLog_ByTask(t *testing.T) {
 		t.Errorf("related_task_id = %v, want %q", entries[0].RelatedTaskID, taskID)
 	}
 }
+
+// requestAs builds a request with a custom X-User-ID header (overriding the
+// owner default supplied by newRequest).
+func requestAs(t *testing.T, userID, method, path string) *http.Request {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", userID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	return req
+}
+
+// listActivityProjectIDs decodes the entries response and returns the
+// related_project_id values (skipping null) so callers can compare visibility.
+func listActivityProjectIDs(t *testing.T, w *httptest.ResponseRecorder) []string {
+	t.Helper()
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string][]ActivityLogEntryResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	ids := []string{}
+	for _, e := range resp["entries"] {
+		if e.RelatedProjectID != nil {
+			ids = append(ids, *e.RelatedProjectID)
+		}
+	}
+	return ids
+}
+
+func contains(ids []string, want string) bool {
+	for _, id := range ids {
+		if id == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestListActivityLog_MemberRowIsolation verifies PRD §3.4: a member can only
+// see activity_log rows that belong to a project they participate in (here:
+// projects they created). Owners/admins see everything.
+func TestListActivityLog_MemberRowIsolation(t *testing.T) {
+	ctx := context.Background()
+
+	// Create two member-role users in the existing test workspace.
+	var member1ID, member2ID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+	`, "Activity Iso Member 1", "activity-iso-member1@multica.ai").Scan(&member1ID); err != nil {
+		t.Fatalf("create member1 user: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+	`, "Activity Iso Member 2", "activity-iso-member2@multica.ai").Scan(&member2ID); err != nil {
+		t.Fatalf("create member2 user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE id IN ($1, $2)`, member1ID, member2ID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member'), ($1, $3, 'member')
+	`, testWorkspaceID, member1ID, member2ID); err != nil {
+		t.Fatalf("create members: %v", err)
+	}
+
+	// Two projects, one owned by each member.
+	var proj1ID, proj2ID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title, description, status, created_by, creator_owner_id)
+		VALUES ($1, 'iso project 1', '', 'not_started', $2, $2) RETURNING id
+	`, testWorkspaceID, member1ID).Scan(&proj1ID); err != nil {
+		t.Fatalf("create proj1: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title, description, status, created_by, creator_owner_id)
+		VALUES ($1, 'iso project 2', '', 'not_started', $2, $2) RETURNING id
+	`, testWorkspaceID, member2ID).Scan(&proj2ID); err != nil {
+		t.Fatalf("create proj2: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM project WHERE id IN ($1, $2)`, proj1ID, proj2ID)
+	})
+	t.Cleanup(func() {
+		activityCleanup(t, proj1ID, "", "")
+		activityCleanup(t, proj2ID, "", "")
+	})
+
+	// Activity rows: each authored by some unrelated actor (the workspace owner)
+	// so visibility must come from project ownership, not actor self-match.
+	wsUUID := uuid.MustParse(testWorkspaceID)
+	ownerActor := uuid.MustParse(testUserID)
+	writer := service.NewActivityWriter(testHandler.Queries)
+	writer.Write(ctx, service.ActivityEntry{
+		WorkspaceID:      wsUUID,
+		EventType:        "iso:proj1_event",
+		ActorID:          ownerActor,
+		ActorType:        "member",
+		RelatedProjectID: uuid.MustParse(proj1ID),
+	})
+	writer.Write(ctx, service.ActivityEntry{
+		WorkspaceID:      wsUUID,
+		EventType:        "iso:proj2_event",
+		ActorID:          ownerActor,
+		ActorType:        "member",
+		RelatedProjectID: uuid.MustParse(proj2ID),
+	})
+
+	// member1 should see proj1's row when filtering by event_type, not proj2's.
+	w := httptest.NewRecorder()
+	testHandler.ListActivityLog(w, requestAs(t, member1ID, "GET", "/api/activity-log?event_type=iso:%25"))
+	got := listActivityProjectIDs(t, w)
+	if !contains(got, proj1ID) {
+		t.Errorf("member1: expected to see proj1 row, got %v", got)
+	}
+	if contains(got, proj2ID) {
+		t.Errorf("member1: must NOT see proj2 row, got %v", got)
+	}
+
+	// member2 sees proj2's row, not proj1's.
+	w = httptest.NewRecorder()
+	testHandler.ListActivityLog(w, requestAs(t, member2ID, "GET", "/api/activity-log?event_type=iso:%25"))
+	got = listActivityProjectIDs(t, w)
+	if !contains(got, proj2ID) {
+		t.Errorf("member2: expected to see proj2 row, got %v", got)
+	}
+	if contains(got, proj1ID) {
+		t.Errorf("member2: must NOT see proj1 row, got %v", got)
+	}
+
+	// Owner (admin-equivalent) sees both.
+	w = httptest.NewRecorder()
+	testHandler.ListActivityLog(w, requestAs(t, testUserID, "GET", "/api/activity-log?event_type=iso:%25"))
+	got = listActivityProjectIDs(t, w)
+	if !contains(got, proj1ID) || !contains(got, proj2ID) {
+		t.Errorf("owner: expected both proj rows, got %v", got)
+	}
+
+	// member1 also gets project_id-filtered isolation: querying their own
+	// project returns the row; querying member2's project returns nothing.
+	w = httptest.NewRecorder()
+	testHandler.ListActivityLog(w, requestAs(t, member1ID, "GET", "/api/activity-log?project_id="+proj1ID))
+	if got = listActivityProjectIDs(t, w); !contains(got, proj1ID) || len(got) != 1 {
+		t.Errorf("member1 by project_id=proj1: expected only proj1, got %v", got)
+	}
+	w = httptest.NewRecorder()
+	testHandler.ListActivityLog(w, requestAs(t, member1ID, "GET", "/api/activity-log?project_id="+proj2ID))
+	if got = listActivityProjectIDs(t, w); len(got) != 0 {
+		t.Errorf("member1 by project_id=proj2: expected empty, got %v", got)
+	}
+}
+
+// TestListActivityLog_MemberChannelMembershipVisibility covers the second
+// branch of the accessible_projects CTE: a member who is NOT the project
+// creator but IS a member of a channel linked to that project should still
+// see activity rows for that project. A second member without channel
+// membership must not.
+func TestListActivityLog_MemberChannelMembershipVisibility(t *testing.T) {
+	ctx := context.Background()
+
+	// Two member-role users; the workspace owner (testUserID) acts as admin
+	// and creates the project so neither member is the creator.
+	var member1ID, member2ID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+	`, "Activity Channel Member 1", "activity-channel-member1@multica.ai").Scan(&member1ID); err != nil {
+		t.Fatalf("create member1 user: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+	`, "Activity Channel Member 2", "activity-channel-member2@multica.ai").Scan(&member2ID); err != nil {
+		t.Fatalf("create member2 user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE id IN ($1, $2)`, member1ID, member2ID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member'), ($1, $3, 'member')
+	`, testWorkspaceID, member1ID, member2ID); err != nil {
+		t.Fatalf("create members: %v", err)
+	}
+
+	// Project created by the admin, NOT by either member — so visibility
+	// must come from channel_member, not creator_owner_id.
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title, description, status, created_by, creator_owner_id)
+		VALUES ($1, 'channel-iso project', '', 'not_started', $2, $2) RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+	})
+	t.Cleanup(func() { activityCleanup(t, projectID, "", "") })
+
+	// Channel linked to the project. member1 joins, member2 does not.
+	var channelID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO channel (workspace_id, name, description, created_by, created_by_type, project_id)
+		VALUES ($1, $2, '', $3, 'member', $4) RETURNING id
+	`, testWorkspaceID, "channel-iso-test", testUserID, projectID).Scan(&channelID); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM channel WHERE id = $1`, channelID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO channel_member (channel_id, member_id, member_type) VALUES ($1, $2, 'member')
+	`, channelID, member1ID); err != nil {
+		t.Fatalf("add member1 to channel: %v", err)
+	}
+
+	// Activity row authored by the admin so visibility cannot leak through
+	// the actor_id self-match path.
+	wsUUID := uuid.MustParse(testWorkspaceID)
+	ownerActor := uuid.MustParse(testUserID)
+	writer := service.NewActivityWriter(testHandler.Queries)
+	writer.Write(ctx, service.ActivityEntry{
+		WorkspaceID:      wsUUID,
+		EventType:        "iso:channel_event",
+		ActorID:          ownerActor,
+		ActorType:        "member",
+		RelatedProjectID: uuid.MustParse(projectID),
+	})
+
+	// member1 (in channel) sees the row.
+	w := httptest.NewRecorder()
+	testHandler.ListActivityLog(w, requestAs(t, member1ID, "GET", "/api/activity-log?event_type=iso:channel_event"))
+	got := listActivityProjectIDs(t, w)
+	if !contains(got, projectID) {
+		t.Errorf("member1 (channel member): expected to see project row, got %v", got)
+	}
+
+	// member2 (NOT in channel) does not.
+	w = httptest.NewRecorder()
+	testHandler.ListActivityLog(w, requestAs(t, member2ID, "GET", "/api/activity-log?event_type=iso:channel_event"))
+	got = listActivityProjectIDs(t, w)
+	if contains(got, projectID) {
+		t.Errorf("member2 (no channel membership): must NOT see project row, got %v", got)
+	}
+}
