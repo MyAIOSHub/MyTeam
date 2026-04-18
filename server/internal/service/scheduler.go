@@ -727,7 +727,10 @@ func scoreAgentForTask(agent db.Agent, runtime db.AgentRuntime, task db.Task, is
 		}
 	}
 
-	fresh := 0.0
+	// Brand-new agents (no last_active_at yet) score neutral, not worst —
+	// otherwise a never-pinged agent gets penalized harder than one that
+	// went stale 23 hours ago, which inverts the freshness intent.
+	fresh := 0.5
 	if agent.LastActiveAt.Valid {
 		ageHours := time.Since(agent.LastActiveAt.Time).Hours()
 		switch {

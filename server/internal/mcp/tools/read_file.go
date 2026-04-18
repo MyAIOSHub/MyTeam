@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/multica-ai/multica/server/internal/mcp/mcptool"
@@ -46,9 +47,28 @@ func (ReadFile) Exec(ctx context.Context, q *db.Queries, ws mcptool.Context, arg
 		return mcptool.Result{}, err
 	}
 
-	files, err := q.ListFilesByProject(ctx, pgUUID(projectID))
+	allFiles, err := q.ListFilesByProject(ctx, pgUUID(projectID))
 	if err != nil {
 		return mcptool.Result{}, err
+	}
+
+	// Narrow to project-scoped files only — channel-only rows that happen to
+	// carry a project_id MUST NOT leak through here. Defensive workspace
+	// match too, in case a stale row still references this project but lives
+	// in a different workspace.
+	files := make([]db.FileIndex, 0, len(allFiles))
+	for _, f := range allFiles {
+		if !sameUUID(f.WorkspaceID, ws.WorkspaceID) {
+			continue
+		}
+		var scope struct {
+			Scope string `json:"scope"`
+		}
+		_ = json.Unmarshal(f.AccessScope, &scope)
+		if scope.Scope != "project" {
+			continue
+		}
+		files = append(files, f)
 	}
 
 	file, err := selectIndexedFile(files, args)
