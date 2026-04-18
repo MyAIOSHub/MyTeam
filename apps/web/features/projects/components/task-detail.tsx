@@ -5,6 +5,7 @@ import { useTaskStore } from "../task-store";
 import type { Task } from "@/shared/types";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ArtifactReviewCard } from "./artifact-review-card";
 
 export function TaskDetail({ task }: { task: Task }) {
   const slots = useTaskStore((s) => s.slotsByTask[task.id] ?? []);
@@ -96,20 +97,7 @@ export function TaskDetail({ task }: { task: Task }) {
         ) : (
           <div className="flex flex-col gap-2">
             {artifacts.map((a) => (
-              <Card key={a.id} className="p-2 text-sm">
-                <div className="flex items-center justify-between">
-                  <span>
-                    v{a.version} · {a.artifact_type} ·{" "}
-                    {a.title || "(no title)"}
-                  </span>
-                  <Badge variant="outline">{a.retention_class}</Badge>
-                </div>
-                {a.summary && (
-                  <div className="text-muted-foreground mt-1 text-xs">
-                    {a.summary}
-                  </div>
-                )}
-              </Card>
+              <ArtifactReviewCard key={a.id} taskID={task.id} artifact={a} />
             ))}
           </div>
         )}

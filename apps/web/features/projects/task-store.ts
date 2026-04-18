@@ -30,6 +30,7 @@ interface TaskActions {
   loadArtifactReviews: (artifactID: string) => Promise<void>;
   createTask: (req: CreateTaskRequest) => Promise<Task>;
   submitReview: (req: CreateReviewRequest) => Promise<Review>;
+  startRun: (runID: string) => Promise<void>;
 }
 
 export const useTaskStore = create<TaskState & TaskActions>((set, get) => ({
@@ -109,5 +110,12 @@ export const useTaskStore = create<TaskState & TaskActions>((set, get) => ({
       };
     });
     return review;
+  },
+
+  async startRun(runID) {
+    // Fire-and-forget: SchedulerService.ScheduleRun runs asynchronously and
+    // emits run:started over WS, which the realtime sync hook picks up to
+    // refresh derived state. No local cache to mutate here.
+    await api.startRun(runID);
   },
 }));

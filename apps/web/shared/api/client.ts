@@ -1011,4 +1011,11 @@ export class ApiClient {
     const resp = await this.fetch<{ reviews: Review[] } | Review[]>(`/api/artifacts/${artifactId}/reviews`);
     return Array.isArray(resp) ? resp : resp.reviews ?? [];
   }
+
+  // Kicks off a ProjectRun via SchedulerService.ScheduleRun. Server returns
+  // 202 Accepted with no body — the run id is the same one the caller passed
+  // in, so there's nothing to thread back through the response.
+  async startRun(runId: string): Promise<void> {
+    await this.fetch<void>(`/api/runs/${runId}/start`, { method: "POST" });
+  }
 }
