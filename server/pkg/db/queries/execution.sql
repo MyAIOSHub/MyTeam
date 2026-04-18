@@ -44,7 +44,12 @@ UPDATE execution SET
     updated_at = now()
 WHERE id = $1;
 
--- name: CompleteExecution :exec
+-- name: CompleteExecution :execrows
+-- The status='running' guard makes this idempotent: a second concurrent
+-- completion (e.g. retry of a network blip, daemon-side double POST) returns
+-- 0 rows updated and the caller can short-circuit the cascade so
+-- HandleTaskCompletion does not run twice for the same execution and a
+-- human_review slot cannot be silently bypassed.
 UPDATE execution SET
     status = 'completed',
     result = @result,
@@ -54,7 +59,7 @@ UPDATE execution SET
     cost_provider = COALESCE(sqlc.narg('cost_provider')::text, cost_provider),
     completed_at = now(),
     updated_at = now()
-WHERE id = $1;
+WHERE id = $1 AND status = 'running';
 
 -- name: FailExecution :exec
 UPDATE execution SET

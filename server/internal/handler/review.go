@@ -98,9 +98,13 @@ func (h *Handler) CreateReviewHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify artifact exists so we return 404 instead of a generic
-	// validation error from ReviewService.
-	if _, err := h.Queries.GetArtifact(r.Context(), pgUUIDFrom(artifactID)); err != nil {
+	// Load artifact so we can:
+	//   - return 404 instead of a generic validation error from ReviewService
+	//   - derive the authoritative task_id from artifact.task_id rather than
+	//     trusting the client's req.TaskID (otherwise a review on artifact A
+	//     could mutate task B's status via the cascade in ReviewService.Submit)
+	artifact, err := h.Queries.GetArtifact(r.Context(), pgUUIDFrom(artifactID))
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "artifact not found")
 			return
@@ -114,15 +118,21 @@ func (h *Handler) CreateReviewHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	if req.TaskID == "" {
-		writeError(w, http.StatusBadRequest, "task_id required")
-		return
+	// req.TaskID is optional but, when supplied, must match the artifact's
+	// owning task. Reject mismatches so a malicious or buggy client can't
+	// trick the cascade into mutating an unrelated task.
+	if req.TaskID != "" {
+		clientTaskID, err := uuid.Parse(req.TaskID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid task_id")
+			return
+		}
+		if clientTaskID != uuid.UUID(artifact.TaskID.Bytes) {
+			writeError(w, http.StatusBadRequest, "task_id does not match artifact owner")
+			return
+		}
 	}
-	taskID, err := uuid.Parse(req.TaskID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid task_id")
-		return
-	}
+	taskID := uuid.UUID(artifact.TaskID.Bytes)
 	if req.Decision == "" {
 		writeError(w, http.StatusBadRequest, "decision required")
 		return

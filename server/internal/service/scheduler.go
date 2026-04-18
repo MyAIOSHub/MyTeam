@@ -310,21 +310,23 @@ func (s *SchedulerService) HandleTaskCompletion(ctx context.Context, taskID, exe
 		}
 	}
 
-	// 3. Activate before_done slots.
-	var activated []db.ParticipantSlot
+	// 3. Activate before_done slots. The activated slice tells us which
+	//    slots were *flipped* this call — useful for logging/notifications
+	//    but NOT for deciding whether the task can complete: a previous
+	//    HandleTaskCompletion invocation may have already activated the
+	//    blocking review slots, so a second call would see activated=[]
+	//    and incorrectly fall through to TaskStatusCompleted, silently
+	//    bypassing the human review gate. Query the slot table directly.
 	if s.Slots != nil {
-		activated, _ = s.Slots.ActivateBeforeDone(ctx, taskID)
+		_, _ = s.Slots.ActivateBeforeDone(ctx, taskID)
 	}
-	hasReviewSlot := false
-	for _, slot := range activated {
-		if slot.SlotType == SlotTypeHumanReview {
-			hasReviewSlot = true
-			break
-		}
+	blockingReviewCount, err := s.Q.CountBlockingReviewSlots(ctx, task.ID)
+	if err != nil {
+		return fmt.Errorf("count blocking review slots: %w", err)
 	}
 
 	newStatus := TaskStatusCompleted
-	if hasReviewSlot {
+	if blockingReviewCount > 0 {
 		newStatus = TaskStatusUnderReview
 	}
 	if _, err := s.Q.UpdateTaskStatus(ctx, db.UpdateTaskStatusParams{

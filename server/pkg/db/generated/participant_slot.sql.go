@@ -11,6 +11,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countBlockingReviewSlots = `-- name: CountBlockingReviewSlots :one
+SELECT COUNT(*) FROM participant_slot
+WHERE task_id = $1
+  AND slot_type = 'human_review'
+  AND blocking = TRUE
+  AND status IN ('waiting', 'ready', 'in_progress', 'revision_requested')
+`
+
+// Returns the number of blocking human_review slots that have not yet
+// reached a terminal verdict. Used by HandleTaskCompletion to decide
+// whether the task can transition to completed or must wait under review,
+// regardless of whether ActivateBeforeDone activated those slots in this
+// particular invocation (an earlier call may have done so already).
+func (q *Queries) CountBlockingReviewSlots(ctx context.Context, taskID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countBlockingReviewSlots, taskID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createParticipantSlot = `-- name: CreateParticipantSlot :one
 INSERT INTO participant_slot (
     task_id, slot_type, slot_order,

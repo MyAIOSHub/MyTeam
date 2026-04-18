@@ -20,6 +20,18 @@ SELECT * FROM participant_slot WHERE id = $1;
 -- name: ListSlotsByTask :many
 SELECT * FROM participant_slot WHERE task_id = @task_id ORDER BY slot_order ASC, created_at ASC;
 
+-- name: CountBlockingReviewSlots :one
+-- Returns the number of blocking human_review slots that have not yet
+-- reached a terminal verdict. Used by HandleTaskCompletion to decide
+-- whether the task can transition to completed or must wait under review,
+-- regardless of whether ActivateBeforeDone activated those slots in this
+-- particular invocation (an earlier call may have done so already).
+SELECT COUNT(*) FROM participant_slot
+WHERE task_id = @task_id
+  AND slot_type = 'human_review'
+  AND blocking = TRUE
+  AND status IN ('waiting', 'ready', 'in_progress', 'revision_requested');
+
 -- name: UpdateSlotStatus :one
 UPDATE participant_slot SET
     status = @status,

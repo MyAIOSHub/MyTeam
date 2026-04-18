@@ -65,7 +65,7 @@ func (q *Queries) ClaimExecution(ctx context.Context, arg ClaimExecutionParams) 
 	return i, err
 }
 
-const completeExecution = `-- name: CompleteExecution :exec
+const completeExecution = `-- name: CompleteExecution :execrows
 UPDATE execution SET
     status = 'completed',
     result = $2,
@@ -75,7 +75,7 @@ UPDATE execution SET
     cost_provider = COALESCE($6::text, cost_provider),
     completed_at = now(),
     updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND status = 'running'
 `
 
 type CompleteExecutionParams struct {
@@ -87,8 +87,13 @@ type CompleteExecutionParams struct {
 	CostProvider     pgtype.Text    `json:"cost_provider"`
 }
 
-func (q *Queries) CompleteExecution(ctx context.Context, arg CompleteExecutionParams) error {
-	_, err := q.db.Exec(ctx, completeExecution,
+// The status='running' guard makes this idempotent: a second concurrent
+// completion (e.g. retry of a network blip, daemon-side double POST) returns
+// 0 rows updated and the caller can short-circuit the cascade so
+// HandleTaskCompletion does not run twice for the same execution and a
+// human_review slot cannot be silently bypassed.
+func (q *Queries) CompleteExecution(ctx context.Context, arg CompleteExecutionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeExecution,
 		arg.ID,
 		arg.Result,
 		arg.CostInputTokens,
@@ -96,7 +101,10 @@ func (q *Queries) CompleteExecution(ctx context.Context, arg CompleteExecutionPa
 		arg.CostUsd,
 		arg.CostProvider,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const countInflightExecutionsForRuntime = `-- name: CountInflightExecutionsForRuntime :one

@@ -508,6 +508,18 @@ func (s *CloudExecutorService) runExecutionAsync(parentCtx context.Context, e db
 
 	execIDStr := uuidToStringSafe(e.ID)
 
+	// Belt-and-suspenders panic recovery: a panic in payload parsing, the
+	// backend goroutine, or message draining would otherwise leave the
+	// execution stuck in 'running' forever. Convert it into failExecution so
+	// Scheduler.HandleTaskFailure can run the retry/fallback policy.
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.Error("[cloud-executor] panic in runExecutionAsync",
+				"exec", execIDStr, "recover", rec)
+			s.failExecution(ctx, e, fmt.Sprintf("panic: %v", rec))
+		}
+	}()
+
 	agentRow, err := s.Queries.GetAgent(ctx, e.AgentID)
 	if err != nil {
 		s.failExecution(ctx, e, fmt.Sprintf("get agent: %v", err))
@@ -580,12 +592,22 @@ func (s *CloudExecutorService) runExecutionAsync(parentCtx context.Context, e db
 	// llmclient.Chat surfaces usage stats. Until then we record the result
 	// but leave cost_* unset so the column distinguishes "we don't know" from
 	// a real $0.00 invocation.
-	if err := s.Queries.CompleteExecution(ctx, db.CompleteExecutionParams{
+	rowsAffected, err := s.Queries.CompleteExecution(ctx, db.CompleteExecutionParams{
 		ID:     e.ID,
 		Result: marshalResult(result),
-	}); err != nil {
+	})
+	if err != nil {
 		slog.Warn("[cloud-executor] complete execution failed",
 			"exec", execIDStr, "error", err)
+		return
+	}
+	// Idempotency guard: the WHERE status='running' clause means a second
+	// concurrent completion (e.g. the daemon also POSTed /complete) returns
+	// 0 rows. Skip the cascade so HandleTaskCompletion does not run twice
+	// and silently bypass a human_review slot.
+	if rowsAffected == 0 {
+		slog.Info("[cloud-executor] execution already completed by another path; skipping cascade",
+			"exec", execIDStr)
 		return
 	}
 

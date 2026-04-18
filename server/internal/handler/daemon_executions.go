@@ -247,8 +247,19 @@ func (h *Handler) CompleteExecution(w http.ResponseWriter, r *http.Request) {
 		params.CostProvider = pgtype.Text{String: req.CostProvider, Valid: true}
 	}
 
-	if err := h.Queries.CompleteExecution(r.Context(), params); err != nil {
+	rowsAffected, err := h.Queries.CompleteExecution(r.Context(), params)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "complete failed: "+err.Error())
+		return
+	}
+	// Idempotency: the SQL guard means a second complete (e.g. CloudExecutor
+	// raced the daemon) returns 0 rows. Return 200 so the daemon doesn't retry,
+	// but skip the scheduler cascade so HandleTaskCompletion does not run twice
+	// and silently bypass a human_review slot.
+	if rowsAffected == 0 {
+		slog.Info("execution already completed; skipping scheduler cascade",
+			"execution_id", id)
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
