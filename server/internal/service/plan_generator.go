@@ -491,16 +491,27 @@ func validateSkillCoverage(tasks []TaskDraft, agents []AgentIdentity) []string {
 // fallbackPlan returns a minimal one-task plan with default
 // agent_execution + human_review slots. Used whenever LLM is unavailable
 // or its response can't be parsed.
+//
+// Title/description must be sensible without the LLM — historically we
+// dumped the entire chat context into description/task_brief which made
+// the resulting Project look like a debug dump. The chat context is
+// already preserved in project.source_conversations, so we use a clean
+// placeholder here and rely on fallbackPlanTitle to derive a short
+// human-readable title from the first non-empty input line.
 func fallbackPlan(input string, agents []AgentIdentity) *GeneratePlanResult {
 	var assignedAgent string
 	if len(agents) > 0 {
 		assignedAgent = agents[0].ID
 	}
 
+	planTitle := fallbackPlanTitle(input)
+	const fallbackDescription = "Plan generated without LLM (offline or no API key). " +
+		"Source context is preserved in project.source_conversations; edit this plan to add structure."
+
 	task := TaskDraft{
 		LocalID:                "T1",
-		Title:                  truncate(input, 80),
-		Description:            input,
+		Title:                  planTitle,
+		Description:            fallbackDescription,
 		StepOrder:              1,
 		PrimaryAssigneeAgentID: assignedAgent,
 		RequiredSkills:         []string{},
@@ -531,13 +542,33 @@ func fallbackPlan(input string, agents []AgentIdentity) *GeneratePlanResult {
 
 	return &GeneratePlanResult{
 		Plan: PlanDraft{
-			Title:       truncate(input, 60),
-			Description: input,
-			TaskBrief:   fmt.Sprintf("## Objective\n%s\n", truncate(input, 200)),
+			Title:       planTitle,
+			Description: fallbackDescription,
+			TaskBrief:   "## Objective\nReview source conversations and decompose into tasks.\n",
 		},
 		Tasks: []TaskDraft{task},
 		Slots: slots,
 	}
+}
+
+// fallbackPlanTitle derives a short title from the input. Prefers the
+// first non-blank line that doesn't look like a context-format header
+// (e.g. "[channel: foo]" or a "[timestamp] sender: ..." line); falls
+// back to "Untitled plan" if nothing usable surfaces. Bounded to 60 chars
+// since downstream Project.title columns expect short strings.
+func fallbackPlanTitle(input string) string {
+	for _, line := range strings.Split(input, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Skip the context-format headers/rows from formatMessagesAsContext.
+		if strings.HasPrefix(line, "[") {
+			continue
+		}
+		return truncate(line, 60)
+	}
+	return "Untitled plan"
 }
 
 // buildTextPrompt is the prompt for plain natural-language input (no

@@ -29,6 +29,10 @@ export function GenerateProjectButton({ channelId, channelName }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createdId, setCreatedId] = useState<string | null>(null);
+  // PlanGenerator surfaces warnings (e.g. LLM_UNAVAILABLE, PLAN_GEN_MALFORMED)
+  // when it had to fall back. Surface them so the user knows the resulting
+  // plan needs more attention than a clean LLM-generated one.
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   const count = selectedIds.size;
   const disabled = count === 0;
@@ -38,6 +42,7 @@ export function GenerateProjectButton({ channelId, channelName }: Props) {
     setTitle(`Project from #${channelName}`);
     setError(null);
     setCreatedId(null);
+    setWarnings([]);
     setOpen(true);
   };
 
@@ -67,7 +72,10 @@ export function GenerateProjectButton({ channelId, channelName }: Props) {
         (res as { id?: string }).id ??
         (res as { project?: { id?: string } }).project?.id ??
         null;
+      const responseWarnings =
+        (res as { warnings?: string[] }).warnings ?? [];
       setCreatedId(projectId);
+      setWarnings(responseWarnings);
       clearSelection();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -123,6 +131,22 @@ export function GenerateProjectButton({ channelId, channelName }: Props) {
             {createdId && (
               <div className="mt-3 text-[12px] text-foreground bg-primary/10 rounded-md p-2">
                 Created. <a href={`/plans/${createdId}`} className="underline">View plan →</a>
+              </div>
+            )}
+
+            {warnings.length > 0 && (
+              <div className="mt-2 text-[12px] text-foreground bg-yellow-500/10 border border-yellow-500/30 rounded-md p-2">
+                <div className="font-medium mb-1">Plan generated with warnings:</div>
+                <ul className="list-disc pl-4 space-y-0.5">
+                  {warnings.map((w) => (
+                    <li key={w}>
+                      <code className="text-[11px]">{w}</code>
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-1 text-muted-foreground">
+                  Review the plan before kicking off a run.
+                </div>
               </div>
             )}
 

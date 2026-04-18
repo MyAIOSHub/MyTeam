@@ -314,8 +314,13 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 // CreateProject handles POST /api/projects
 // Basic project creation without chat context.
 func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
+	// Accept both "title" (canonical) and "name" — the latter mirrors the
+	// CreateWorkspace request shape so a UI that uses the same form for
+	// both surfaces doesn't have to special-case the field name. Title
+	// wins when both are supplied.
 	type CreateProjectRequest struct {
 		Title        string  `json:"title"`
+		Name         string  `json:"name"`
 		Description  string  `json:"description"`
 		ScheduleType string  `json:"schedule_type"`
 		CronExpr     *string `json:"cron_expr"`
@@ -327,7 +332,10 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Title == "" {
-		writeError(w, http.StatusBadRequest, "title is required")
+		req.Title = req.Name
+	}
+	if req.Title == "" {
+		writeError(w, http.StatusBadRequest, "title (or name) is required")
 		return
 	}
 
