@@ -5,6 +5,8 @@ import { useSearchParams } from "next/navigation";
 import { useMessagingStore } from "@/features/messaging/store";
 import { useChannelStore } from "@/features/channels/store";
 import { useInboxStore } from "@/features/inbox";
+import { useWorkspaceStore } from "@/features/workspace";
+import { useAuthStore } from "@/features/auth";
 import { MessageList } from "@/features/messaging/components/message-list";
 import { MessageInput } from "@/features/messaging/components/message-input";
 import { ThreadPanel } from "@/features/messaging/components/thread-panel";
@@ -14,7 +16,7 @@ import { api } from "@/shared/api";
 import type { Conversation } from "@/shared/types/messaging";
 import type { Message } from "@/shared/types/messaging";
 import type { Channel } from "@/shared/types/messaging";
-import type { InboxItem, Agent } from "@/shared/types";
+import type { InboxItem } from "@/shared/types";
 import { toast } from "sonner";
 import {
   Hash,
@@ -291,8 +293,15 @@ export default function SessionPage() {
   const sendDmMessage = useMessagingStore((s) => s.sendMessage);
 
   // Personal agent — always shown in DM list as online + interactable, even
-  // before the user has exchanged any messages with it.
-  const [personalAgent, setPersonalAgent] = useState<Agent | null>(null);
+  // before the user has exchanged any messages with it. Derived from the
+  // workspace agents store so realtime `agent:status_changed` events update
+  // the sidebar (see use-realtime-sync's agent → refreshAgents handler).
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const personalAgent = useWorkspaceStore((s) =>
+    s.agents.find(
+      (a) => a.agent_type === "personal_agent" && a.owner_id === currentUserId,
+    ) ?? null,
+  );
 
   const channels = useChannelStore((s) => s.channels);
   const currentChannel = useChannelStore((s) => s.currentChannel);
@@ -311,12 +320,6 @@ export default function SessionPage() {
   useEffect(() => {
     fetchConversations();
     fetchChannels();
-    // Personal agent is auto-provisioned on the server; if the call fails we
-    // simply skip the synthetic DM row rather than blocking the page.
-    api
-      .getPersonalAgent()
-      .then((agent) => setPersonalAgent(agent))
-      .catch(() => setPersonalAgent(null));
   }, [fetchConversations, fetchChannels]);
 
   // DM list shown in the sidebar = real conversations + the personal agent
