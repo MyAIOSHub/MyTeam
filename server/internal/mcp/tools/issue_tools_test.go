@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -15,18 +16,30 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-const (
-	issueToolsTestEmail         = "mcp-issue-tools-test@multica.ai"
-	issueToolsTestWorkspaceSlug = "mcp-issue-tools"
-)
-
 type issueToolsFixture struct {
-	pool        *pgxpool.Pool
-	queries     *db.Queries
-	comments    *service.CommentService
-	userID      uuid.UUID
-	workspaceID uuid.UUID
-	issueID     uuid.UUID
+	pool          *pgxpool.Pool
+	queries       *db.Queries
+	comments      *service.CommentService
+	userID        uuid.UUID
+	workspaceID   uuid.UUID
+	issueID       uuid.UUID
+	userEmail     string
+	workspaceSlug string
+}
+
+// fixtureIDs derives a workspace slug and user email from t.Name(). Each test
+// gets unique values so tests using t.Parallel() don't collide on the workspace
+// slug UNIQUE constraint or on the cleanup DELETE WHERE slug/email statements.
+func fixtureIDs(t *testing.T) (slug, email string) {
+	t.Helper()
+	// t.Name() may contain '/', spaces, or other characters from subtests.
+	// Normalize to a slug-safe form.
+	safe := strings.ToLower(t.Name())
+	safe = strings.ReplaceAll(safe, "/", "-")
+	safe = strings.ReplaceAll(safe, " ", "-")
+	slug = "mcp-it-" + safe
+	email = "mcp-it-" + safe + "@multica.ai"
+	return slug, email
 }
 
 func setupIssueToolsFixture(t *testing.T) *issueToolsFixture {
@@ -46,7 +59,9 @@ func setupIssueToolsFixture(t *testing.T) *issueToolsFixture {
 		t.Skipf("database not reachable: %v", err)
 	}
 
-	if err := cleanupIssueToolsFixture(ctx, pool); err != nil {
+	slug, email := fixtureIDs(t)
+
+	if err := cleanupIssueToolsFixture(ctx, pool, slug, email); err != nil {
 		pool.Close()
 		t.Fatalf("cleanup pre-fixture: %v", err)
 	}
@@ -56,7 +71,7 @@ func setupIssueToolsFixture(t *testing.T) *issueToolsFixture {
 		INSERT INTO "user" (name, email)
 		VALUES ($1, $2)
 		RETURNING id
-	`, "MCP Issue Tools Test", issueToolsTestEmail).Scan(&userIDStr); err != nil {
+	`, "MCP Issue Tools Test", email).Scan(&userIDStr); err != nil {
 		pool.Close()
 		t.Fatalf("insert user: %v", err)
 	}
@@ -66,7 +81,7 @@ func setupIssueToolsFixture(t *testing.T) *issueToolsFixture {
 		INSERT INTO workspace (name, slug, description, issue_prefix)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id
-	`, "MCP Issue Tools", issueToolsTestWorkspaceSlug, "MCP issue-tools test workspace", "MIT").Scan(&workspaceIDStr); err != nil {
+	`, "MCP Issue Tools", slug, "MCP issue-tools test workspace", "MIT").Scan(&workspaceIDStr); err != nil {
 		pool.Close()
 		t.Fatalf("insert workspace: %v", err)
 	}
@@ -90,7 +105,7 @@ func setupIssueToolsFixture(t *testing.T) *issueToolsFixture {
 	}
 
 	t.Cleanup(func() {
-		if err := cleanupIssueToolsFixture(context.Background(), pool); err != nil {
+		if err := cleanupIssueToolsFixture(context.Background(), pool, slug, email); err != nil {
 			t.Logf("cleanup post-test: %v", err)
 		}
 		pool.Close()
@@ -103,20 +118,22 @@ func setupIssueToolsFixture(t *testing.T) *issueToolsFixture {
 	comments := service.NewCommentService(queries, bus, tasks)
 
 	return &issueToolsFixture{
-		pool:        pool,
-		queries:     queries,
-		comments:    comments,
-		userID:      uuid.MustParse(userIDStr),
-		workspaceID: uuid.MustParse(workspaceIDStr),
-		issueID:     uuid.MustParse(issueIDStr),
+		pool:          pool,
+		queries:       queries,
+		comments:      comments,
+		userID:        uuid.MustParse(userIDStr),
+		workspaceID:   uuid.MustParse(workspaceIDStr),
+		issueID:       uuid.MustParse(issueIDStr),
+		userEmail:     email,
+		workspaceSlug: slug,
 	}
 }
 
-func cleanupIssueToolsFixture(ctx context.Context, pool *pgxpool.Pool) error {
-	if _, err := pool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, issueToolsTestWorkspaceSlug); err != nil {
+func cleanupIssueToolsFixture(ctx context.Context, pool *pgxpool.Pool, slug, email string) error {
+	if _, err := pool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug); err != nil {
 		return fmt.Errorf("delete workspace: %w", err)
 	}
-	if _, err := pool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, issueToolsTestEmail); err != nil {
+	if _, err := pool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email); err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
 	return nil
@@ -132,6 +149,7 @@ func toolCtx(f *issueToolsFixture) mcptool.Context {
 }
 
 func TestGetIssueHappyPath(t *testing.T) {
+	t.Parallel()
 	f := setupIssueToolsFixture(t)
 	ctx := context.Background()
 
@@ -157,6 +175,7 @@ func TestGetIssueHappyPath(t *testing.T) {
 }
 
 func TestGetIssueWrongWorkspaceReturnsError(t *testing.T) {
+	t.Parallel()
 	f := setupIssueToolsFixture(t)
 	ctx := context.Background()
 
@@ -172,6 +191,7 @@ func TestGetIssueWrongWorkspaceReturnsError(t *testing.T) {
 }
 
 func TestUpdateIssueStatusHappyPath(t *testing.T) {
+	t.Parallel()
 	f := setupIssueToolsFixture(t)
 	ctx := context.Background()
 
@@ -191,7 +211,26 @@ func TestUpdateIssueStatusHappyPath(t *testing.T) {
 	}
 }
 
+// TestUpdateIssueStatusInvalidStatusRejected covers the case where the caller
+// passes a status string that is not in the issue.status CHECK constraint
+// set (see migrations/001_init.up.sql). The DB must reject the write so we
+// don't silently store an unknown status.
+func TestUpdateIssueStatusInvalidStatusRejected(t *testing.T) {
+	t.Parallel()
+	f := setupIssueToolsFixture(t)
+	ctx := context.Background()
+
+	_, err := UpdateIssueStatus{}.Exec(ctx, f.queries, toolCtx(f), map[string]any{
+		"issue_id": f.issueID.String(),
+		"status":   "not_a_real_status",
+	})
+	if err == nil {
+		t.Fatal("expected error when status is not in the CHECK constraint set")
+	}
+}
+
 func TestCreateAndListComments(t *testing.T) {
+	t.Parallel()
 	f := setupIssueToolsFixture(t)
 	ctx := context.Background()
 
@@ -240,7 +279,66 @@ func TestCreateAndListComments(t *testing.T) {
 	}
 }
 
+// TestCreateCommentEmptyBodyRejected covers the validation guard in
+// CreateComment.Exec for empty body strings — the call must fail before
+// touching the database.
+func TestCreateCommentEmptyBodyRejected(t *testing.T) {
+	t.Parallel()
+	f := setupIssueToolsFixture(t)
+	ctx := context.Background()
+
+	_, err := CreateComment{}.Exec(ctx, f.queries, toolCtx(f), map[string]any{
+		"issue_id": f.issueID.String(),
+		"body":     "",
+	})
+	if err == nil {
+		t.Fatal("expected error when body is empty")
+	}
+}
+
+// TestListIssueCommentsOffsetOutOfRange exercises the paging guard in
+// paginateComments: when offset exceeds the total comment count, the tool
+// should return an empty comments slice (not panic, not negative-index).
+func TestListIssueCommentsOffsetOutOfRange(t *testing.T) {
+	t.Parallel()
+	f := setupIssueToolsFixture(t)
+	ctx := context.Background()
+
+	// Seed exactly one comment.
+	_, err := CreateComment{}.Exec(ctx, f.queries, toolCtx(f), map[string]any{
+		"issue_id": f.issueID.String(),
+		"body":     "only comment",
+	})
+	if err != nil {
+		t.Fatalf("seed CreateComment: %v", err)
+	}
+
+	listed, err := ListIssueComments{}.Exec(ctx, f.queries, toolCtx(f), map[string]any{
+		"issue_id": f.issueID.String(),
+		"offset":   100, // far beyond the single seeded comment
+	})
+	if err != nil {
+		t.Fatalf("ListIssueComments: %v", err)
+	}
+	data, ok := listed.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected Data to be a map, got %T", listed.Data)
+	}
+	comments, ok := data["comments"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected comments to be []map[string]any, got %T", data["comments"])
+	}
+	if len(comments) != 0 {
+		t.Errorf("expected empty comments slice for OOB offset, got %d", len(comments))
+	}
+	// Total should still reflect the underlying row count, not the sliced view.
+	if total, _ := data["total"].(int); total != 1 {
+		t.Errorf("total = %v, want 1", data["total"])
+	}
+}
+
 func TestCreateCommentAsAgent(t *testing.T) {
+	t.Parallel()
 	f := setupIssueToolsFixture(t)
 	ctx := context.Background()
 
