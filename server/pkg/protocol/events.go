@@ -11,13 +11,13 @@ const (
 	EventCommentCreated       = "comment:created"
 	EventCommentUpdated       = "comment:updated"
 	EventCommentDeleted       = "comment:deleted"
-	EventReactionAdded          = "reaction:added"
-	EventReactionRemoved        = "reaction:removed"
-	EventIssueReactionAdded     = "issue_reaction:added"
-	EventIssueReactionRemoved   = "issue_reaction:removed"
+	EventReactionAdded        = "reaction:added"
+	EventReactionRemoved      = "reaction:removed"
+	EventIssueReactionAdded   = "issue_reaction:added"
+	EventIssueReactionRemoved = "issue_reaction:removed"
 
 	// Agent events
-	EventAgentStatus   = "agent:status"
+	EventAgentStatus   = "agent:status_changed"
 	EventAgentCreated  = "agent:created"
 	EventAgentArchived = "agent:archived"
 	EventAgentRestored = "agent:restored"
@@ -31,9 +31,9 @@ const (
 	EventTaskCancelled = "task:cancelled"
 
 	// Inbox events
-	EventInboxNew           = "inbox:new"
-	EventInboxRead          = "inbox:read"
-	EventInboxArchived      = "inbox:archived"
+	EventInboxNew           = "inbox:item_created"
+	EventInboxRead          = "inbox:item_read"
+	EventInboxArchived      = "inbox:item_resolved"
 	EventInboxBatchRead     = "inbox:batch-read"
 	EventInboxBatchArchived = "inbox:batch-archived"
 
@@ -82,9 +82,9 @@ const (
 	EventRunFailed    = "run:failed"
 
 	// Plan events
-	EventPlanGenerated = "plan:generated"
-	EventPlanApproved  = "plan:approved"
-	EventPlanRejected  = "plan:rejected"
+	EventPlanGenerated = "plan:created"
+	EventPlanApproved  = "plan:approval_changed"
+	EventPlanRejected  = "plan:approval_changed"
 
 	// Channel events
 	EventChannelUpdated = "channel:updated"

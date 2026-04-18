@@ -45,9 +45,10 @@ func (h *Handler) StartImpersonation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.publish("agent:impersonation_started", workspaceID, "member", ownerID, map[string]any{
-		"agent_id": agentID,
-		"owner_id": ownerID,
+	h.publish("impersonation:started", workspaceID, "member", ownerID, map[string]any{
+		"session_id": uuidToString(session.ID),
+		"agent_id":   agentID,
+		"owner_id":   ownerID,
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -74,7 +75,7 @@ func (h *Handler) EndImpersonation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.publish("agent:impersonation_ended", workspaceID, "member", ownerID, map[string]any{
+	h.publish("impersonation:ended", workspaceID, "member", ownerID, map[string]any{
 		"agent_id": agentID,
 	})
 

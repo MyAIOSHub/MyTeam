@@ -105,7 +105,7 @@ func (h *Handler) CreatePlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	h.publish("plan.created", workspaceID, actorType, actorID, map[string]string{
+	h.publish("plan:created", workspaceID, actorType, actorID, map[string]string{
 		"plan_id": uuidToString(plan.ID),
 	})
 
@@ -237,8 +237,11 @@ func (h *Handler) ApprovePlan(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Publish event
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	h.publish("plan.approved", workspaceID, actorType, actorID, map[string]string{
-		"plan_id": planID,
+	h.publish("plan:approval_changed", workspaceID, actorType, actorID, map[string]string{
+		"plan_id":  planID,
+		"from":     plan.ApprovalStatus,
+		"to":       "approved",
+		"actor_id": actorID,
 	})
 
 	// 4. Optionally trigger workflow creation via Scheduler

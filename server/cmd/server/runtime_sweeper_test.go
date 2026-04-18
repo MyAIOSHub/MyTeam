@@ -8,6 +8,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // setupSweeperTestFixture creates an issue and a task in the given status with
@@ -174,10 +175,10 @@ func TestSweepStaleTasksReconcileAgentStatus(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
 
-	// Capture agent:status events
+	// Capture agent status change events
 	var agentStatusEvents []events.Event
 	var mu sync.Mutex
-	bus.Subscribe("agent:status", func(e events.Event) {
+	bus.Subscribe(protocol.EventAgentStatus, func(e events.Event) {
 		mu.Lock()
 		agentStatusEvents = append(agentStatusEvents, e)
 		mu.Unlock()
@@ -207,15 +208,15 @@ func TestSweepStaleTasksReconcileAgentStatus(t *testing.T) {
 		t.Fatalf("expected agent status 'idle', got '%s'", agentStatus)
 	}
 
-	// Verify agent:status event was published with correct WorkspaceID
+	// Verify agent status change event was published with correct WorkspaceID
 	mu.Lock()
 	defer mu.Unlock()
 	if len(agentStatusEvents) == 0 {
-		t.Fatal("expected agent:status event to be published")
+		t.Fatal("expected agent status change event to be published")
 	}
 	lastEvent := agentStatusEvents[len(agentStatusEvents)-1]
 	if lastEvent.WorkspaceID == "" {
-		t.Fatal("agent:status event should have WorkspaceID set")
+		t.Fatal("agent status change event should have WorkspaceID set")
 	}
 	if lastEvent.WorkspaceID != testWorkspaceID {
 		t.Fatalf("expected WorkspaceID %s, got %s", testWorkspaceID, lastEvent.WorkspaceID)

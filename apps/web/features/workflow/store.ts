@@ -13,35 +13,17 @@ interface WorkflowState {
   plans: Plan[];
   currentWorkflow: Workflow | null;
   loading: boolean;
-  fetchWorkflows: () => Promise<void>;
   fetchPlans: () => Promise<void>;
   setCurrentWorkflow: (w: Workflow | null) => void;
   generatePlan: (input: string) => Promise<Plan | null>;
-  retryStep: (workflowId: string, stepId: string) => Promise<void>;
-  replaceStepAgent: (workflowId: string, stepId: string, agentId: string) => Promise<void>;
   updateStepInWorkflow: (workflowId: string, stepId: string, updates: Partial<Workflow["steps"] extends (infer S)[] | undefined ? S : never>) => void;
 }
 
-export const useWorkflowStore = create<WorkflowState>((set, get) => ({
+export const useWorkflowStore = create<WorkflowState>((set) => ({
   workflows: [],
   plans: [],
   currentWorkflow: null,
   loading: true,
-
-  fetchWorkflows: async () => {
-    logger.debug("fetch workflows start");
-    const isInitialLoad = get().workflows.length === 0;
-    if (isInitialLoad) set({ loading: true });
-    try {
-      const res = await api.listWorkflows(200);
-      logger.info("fetched", res.workflows.length, "workflows");
-      set({ workflows: res.workflows as Workflow[], loading: false });
-    } catch (err) {
-      logger.error("fetch workflows failed", err);
-      toast.error("加载工作流失败");
-      if (isInitialLoad) set({ loading: false });
-    }
-  },
 
   fetchPlans: async () => {
     logger.debug("fetch plans start");
@@ -67,28 +49,6 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       logger.error("generate plan failed", err);
       toast.error("生成计划失败");
       return null;
-    }
-  },
-
-  retryStep: async (workflowId: string, stepId: string) => {
-    try {
-      await api.retryWorkflowStep(workflowId, stepId);
-      logger.info("retry step", stepId);
-      toast.success("已触发重试");
-    } catch (err) {
-      logger.error("retry step failed", err);
-      toast.error("重试步骤失败");
-    }
-  },
-
-  replaceStepAgent: async (workflowId: string, stepId: string, agentId: string) => {
-    try {
-      await api.replaceStepAgent(workflowId, stepId, agentId);
-      logger.info("replace step agent", stepId, agentId);
-      toast.success("已替换Agent");
-    } catch (err) {
-      logger.error("replace step agent failed", err);
-      toast.error("替换Agent失败");
     }
   },
 

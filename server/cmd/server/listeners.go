@@ -37,7 +37,7 @@ func registerListeners(bus *events.Bus, hub *realtime.Hub) {
 		hub.SendToUser(recipientID, data)
 	}
 
-	// inbox:new — extract recipient from nested item
+	// inbox:item_created — extract recipient from nested item
 	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
 		payload, ok := e.Payload.(map[string]any)
 		if !ok {
@@ -51,7 +51,7 @@ func registerListeners(bus *events.Bus, hub *realtime.Hub) {
 		sendToRecipient(hub, e, recipientID)
 	})
 
-	// inbox:read, inbox:archived, inbox:batch-read, inbox:batch-archived
+	// inbox:item_read, inbox:item_resolved, inbox:batch-read, inbox:batch-archived
 	// — extract recipient from top-level payload
 	for _, eventType := range []string{
 		protocol.EventInboxRead, protocol.EventInboxArchived,

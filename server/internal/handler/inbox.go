@@ -207,6 +207,7 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventInboxArchived, workspaceID, "member", userID, map[string]any{
 		"item_id":      uuidToString(item.ID),
 		"recipient_id": uuidToString(item.RecipientID),
+		"resolution":   "archived",
 	})
 
 	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)

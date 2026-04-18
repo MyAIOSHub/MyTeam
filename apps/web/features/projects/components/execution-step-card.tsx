@@ -1,36 +1,20 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import type { WorkflowStep, WorkflowStepStatus } from "@/shared/types/workflow";
-import type { Agent } from "@/shared/types";
-import {
-  RefreshCw,
-  UserRoundCog,
-  Bot,
-  Clock,
-  ChevronDown,
-} from "lucide-react";
+import type { Agent, Task, TaskStatus } from "@/shared/types";
+import { Bot, Clock } from "lucide-react";
 
 interface ExecutionStepCardProps {
-  step: WorkflowStep;
+  step: Task;
   agents: Agent[];
-  workflowId: string;
-  onRetry: (stepId: string) => void;
-  onReplaceAgent: (stepId: string, agentId: string) => void;
 }
 
 const STATUS_CONFIG: Record<
-  WorkflowStepStatus,
+  TaskStatus,
   { label: string; className: string }
 > = {
-  pending: { label: "待处理", className: "bg-muted text-muted-foreground" },
+  draft: { label: "草稿", className: "bg-muted text-muted-foreground" },
+  ready: { label: "就绪", className: "bg-muted text-muted-foreground" },
   queued: { label: "排队中", className: "bg-muted text-muted-foreground" },
   assigned: {
     label: "已分配",
@@ -42,23 +26,18 @@ const STATUS_CONFIG: Record<
     className:
       "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 animate-pulse",
   },
-  waiting_input: {
+  needs_human: {
     label: "等待输入",
     className:
       "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
   },
-  blocked: {
-    label: "已阻塞",
+  under_review: {
+    label: "审核中",
     className:
       "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
   },
-  retrying: {
-    label: "重试中",
-    className:
-      "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
-  },
-  timeout: {
-    label: "已超时",
+  needs_attention: {
+    label: "需关注",
     className:
       "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
   },
@@ -77,7 +56,7 @@ const STATUS_CONFIG: Record<
   },
 };
 
-function formatDuration(startedAt?: string, completedAt?: string): string | null {
+function formatDuration(startedAt?: string | null, completedAt?: string | null): string | null {
   if (!startedAt) return null;
   const start = new Date(startedAt).getTime();
   const end = completedAt ? new Date(completedAt).getTime() : Date.now();
@@ -101,24 +80,13 @@ function getAgentDisplayName(
 export function ExecutionStepCard({
   step,
   agents,
-  workflowId,
-  onRetry,
-  onReplaceAgent,
 }: ExecutionStepCardProps) {
-  const statusConfig = STATUS_CONFIG[step.status] ?? STATUS_CONFIG.pending;
-  const displayAgentId = step.actual_agent_id ?? step.agent_id;
+  const statusConfig = STATUS_CONFIG[step.status] ?? STATUS_CONFIG.draft;
+  const displayAgentId = step.actual_agent_id ?? step.primary_assignee_id ?? undefined;
   const agentName = getAgentDisplayName(displayAgentId, agents);
   const duration = formatDuration(step.started_at, step.completed_at);
   const maxRetries = step.retry_rule?.max_retries ?? 2;
   const currentRetry = step.current_retry ?? 0;
-  const showRetry =
-    step.status === "failed" ||
-    step.status === "timeout" ||
-    step.status === "blocked";
-  const showReplace =
-    step.status === "failed" ||
-    step.status === "blocked" ||
-    step.status === "timeout";
 
   // Step number badge color
   const numberClass =
@@ -128,7 +96,7 @@ export function ExecutionStepCard({
         ? "bg-blue-500 text-white"
         : step.status === "failed"
           ? "bg-destructive text-destructive-foreground"
-          : step.status === "retrying"
+          : step.status === "needs_attention"
             ? "bg-orange-500 text-white"
             : "bg-muted text-muted-foreground";
 
@@ -147,7 +115,7 @@ export function ExecutionStepCard({
                 : step.step_order}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="font-medium text-sm">{step.description}</div>
+            <div className="font-medium text-sm">{step.description ?? step.title}</div>
             <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-muted-foreground">
               {/* Agent */}
               <span className="inline-flex items-center gap-1">
@@ -175,7 +143,7 @@ export function ExecutionStepCard({
           </div>
         </div>
 
-        {/* Right: status badge + actions */}
+        {/* Right: status badge */}
         <div className="flex items-center gap-2 shrink-0">
           <Badge className={statusConfig.className} variant="outline">
             {statusConfig.label}
@@ -205,62 +173,11 @@ export function ExecutionStepCard({
       )}
 
       {/* Result display */}
-      {step.result && step.status === "completed" && (
+      {step.result != null && step.status === "completed" && (
         <div className="text-xs bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300 p-2 rounded">
           {typeof step.result === "string"
             ? step.result.slice(0, 200)
             : JSON.stringify(step.result).slice(0, 200)}
-        </div>
-      )}
-
-      {/* Action buttons */}
-      {(showRetry || showReplace) && (
-        <div className="flex items-center gap-2 pt-1">
-          {showRetry && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onRetry(step.id)}
-              className="h-7 text-xs"
-            >
-              <RefreshCw className="size-3 mr-1" />
-              重试
-            </Button>
-          )}
-          {showReplace && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={<Button size="sm" variant="outline" className="h-7 text-xs" />}
-              >
-                <UserRoundCog className="size-3 mr-1" />
-                替换Agent
-                <ChevronDown className="size-3 ml-1" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                {agents.length === 0 && (
-                  <DropdownMenuItem disabled>暂无可用Agent</DropdownMenuItem>
-                )}
-                {agents
-                  .filter((a) => a.id !== displayAgentId && !a.archived_at)
-                  .map((agent) => (
-                    <DropdownMenuItem
-                      key={agent.id}
-                      onClick={() => onReplaceAgent(step.id, agent.id)}
-                    >
-                      <Bot className="size-3 mr-2 shrink-0" />
-                      <div className="min-w-0">
-                        <div className="text-sm truncate">{agent.name}</div>
-                        {agent.identity_card?.capabilities?.length ? (
-                          <div className="text-xs text-muted-foreground truncate">
-                            {agent.identity_card.capabilities.slice(0, 3).join(", ")}
-                          </div>
-                        ) : null}
-                      </div>
-                    </DropdownMenuItem>
-                  ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
         </div>
       )}
     </div>
