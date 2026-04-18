@@ -626,12 +626,6 @@ func pgUUIDEqual(got any, want pgtype.UUID) bool {
 	return ok && gotUUID.Valid == want.Valid && gotUUID.Bytes == want.Bytes
 }
 
-func uuidString(id pgtype.UUID) string {
-	if !id.Valid {
-		return ""
-	}
-	return uuid.UUID(id.Bytes).String()
-}
 
 func testTime(offset int) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: time.Unix(int64(offset), 0).UTC(), Valid: true}
