@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -54,11 +55,16 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	s3 := storage.NewS3StorageFromEnv()
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
 	h := handler.New(queries, pool, hub, bus, emailSvc, s3, cfSigner)
-	h.AutoReplyService = service.NewAutoReplyService(queries, hub, agent_runner.NewRunner())
+	// Single Claude Agent SDK runner shared across every cloud-mode invocation
+	// path so a system / personal / project agent's cloud_llm_config controls
+	// the same SDK installation regardless of who triggered it.
+	cloudRunner := agent_runner.NewRunner()
+	h.AutoReplyService = service.NewAutoReplyService(queries, hub, cloudRunner)
 	h.PlanGenerator = service.NewPlanGeneratorService(queries)
 	h.IdentityGenerator = service.NewIdentityGeneratorService(queries)
-	h.Scheduler = service.NewSchedulerService(queries, hub)
-	h.Scheduler.Bus = bus
+	// Scheduler / Slots / Artifacts / Reviews / Quota are constructed inside
+	// handler.New so route handlers and lifecycle services share the same
+	// instances. See internal/handler/handler.go.
 
 	// Identity generator + scheduler
 	identityGen := service.NewIdentityGeneratorService(queries)
@@ -68,8 +74,11 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	// Start auto-reply poll daemon
 	go h.AutoReplyService.StartPollDaemon(context.Background())
 
-	// Start cloud executor service
-	cloudExecutor := service.NewCloudExecutorService(queries, hub, bus, h.TaskService)
+	// Start cloud executor service. Scheduler is wired in so that completing
+	// or failing executions on the new execution table cascades into the
+	// Plan/Run state machine (per PRD §10.3). The legacy agent_task_queue
+	// path inside CloudExecutorService is unaffected.
+	cloudExecutor := service.NewCloudExecutorService(queries, hub, bus, h.TaskService, h.Scheduler, cloudRunner)
 	cloudExecutor.Start(context.Background())
 
 	// Audit + notification services
@@ -118,6 +127,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
+	// Prometheus metrics (public; scrapers don't carry JWT).
+	r.Handle("/metrics", promhttp.Handler())
+
 	// WebSocket
 	mc := &membershipChecker{queries: queries}
 	pr := &patResolver{queries: queries}
@@ -150,6 +162,17 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		r.Post("/tasks/{taskId}/fail", h.FailTask)
 		r.Post("/tasks/{taskId}/messages", h.ReportTaskMessages)
 		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
+
+		// Plan 5 §10.2: Project Execution endpoints. The daemon polls
+		// these alongside the Issue task endpoints above; when both
+		// queues have work at the same priority, Project Execution wins.
+		r.Get("/runtimes/{runtimeId}/executions/pending", h.ListPendingExecutions)
+		r.Post("/runtimes/{runtimeId}/executions/claim", h.ClaimExecution)
+		r.Post("/executions/{id}/start", h.StartExecution)
+		r.Post("/executions/{id}/progress", h.ProgressExecution)
+		r.Post("/executions/{id}/complete", h.CompleteExecution)
+		r.Post("/executions/{id}/fail", h.FailExecution)
+		r.Post("/executions/{id}/messages", h.StreamExecutionMessage)
 	})
 
 	// Protected API routes
@@ -183,6 +206,14 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 						r.Patch("/", h.UpdateMember)
 						r.Delete("/", h.DeleteMember)
 					})
+					// Workspace secrets (admin/owner only — values authorize
+					// external integrations and are never exposed to members).
+					r.Route("/secrets", func(r chi.Router) {
+						r.Get("/", h.ListWorkspaceSecrets)
+						r.Get("/{key}", h.GetWorkspaceSecret)
+						r.Put("/{key}", h.SetWorkspaceSecret)
+						r.Delete("/{key}", h.DeleteWorkspaceSecret)
+					})
 				})
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
@@ -194,6 +225,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 			r.Post("/", h.CreatePersonalAccessToken)
 			r.Delete("/{id}", h.RevokePersonalAccessToken)
 		})
+
+		// Provider registry (static catalog of execution providers)
+		providerHandler := handler.NewProviderHandler()
+		r.Get("/api/providers", providerHandler.List)
 
 		// --- Workspace-scoped routes (all require workspace membership) ---
 		r.Group(func(r chi.Router) {
@@ -344,7 +379,20 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Post("/transfer-founder", h.TransferFounder)
 					r.Post("/split", h.SplitChannel)
 					r.Post("/merge-request", h.CreateMergeRequest)
+					// Thread API (Plan 3)
+					r.Get("/threads", h.ListThreads)
+					r.Post("/threads", h.CreateThread)
 				})
+			})
+
+			// Thread API (Plan 3 / Phase 2)
+			r.Route("/api/threads/{threadID}", func(r chi.Router) {
+				r.Get("/", h.GetThread)
+				r.Get("/messages", h.ListThreadMessages)
+				r.Post("/messages", h.PostThreadMessage)
+				r.Get("/context-items", h.ListThreadContextItems)
+				r.Post("/context-items", h.CreateThreadContextItem)
+				r.Delete("/context-items/{itemID}", h.DeleteThreadContextItem)
 			})
 
 			// Merge requests
@@ -377,24 +425,35 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Get("/", h.GetPlan)
 					r.Delete("/", h.DeletePlan)
 					r.Post("/approve", h.ApprovePlan)
+					// Plan 5 §10: Task surface scoped to a plan.
+					r.Get("/tasks", h.ListTasksByPlan)
 				})
 			})
 
-			// Workflows
-			r.Route("/api/workflows", func(r chi.Router) {
-				r.Post("/", h.CreateWorkflow)
-				r.Get("/", h.ListWorkflows)
-				r.Route("/{workflowID}", func(r chi.Router) {
-					r.Get("/", h.GetWorkflow)
-					r.Patch("/status", h.UpdateWorkflowStatus)
-					r.Patch("/dag", h.UpdateWorkflowDAG)
-					r.Delete("/", h.DeleteWorkflow)
-					r.Get("/steps", h.ListWorkflowSteps)
-					r.Post("/start", h.StartWorkflow)
-					r.Post("/steps/{stepID}/retry", h.RetryWorkflowStep)
-					r.Patch("/steps/{stepID}/agent", h.ReplaceStepAgent)
+			// Plan 5 §10 — Project five-layer API: tasks, slots,
+			// executions, artifacts, reviews. State transitions flow
+			// through SchedulerService; PATCH on tasks accepts only
+			// status=cancelled (see handler/task.go).
+			r.Route("/api/tasks", func(r chi.Router) {
+				r.Post("/", h.CreateTaskHandler)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetTaskHandler)
+					r.Patch("/", h.UpdateTaskHandler)
+					r.Get("/slots", h.ListTaskSlots)
+					r.Post("/slots", h.CreateTaskSlot)
+					r.Get("/executions", h.ListTaskExecutions)
+					r.Get("/artifacts", h.ListTaskArtifacts)
 				})
 			})
+			r.Route("/api/artifacts/{id}", func(r chi.Router) {
+				r.Get("/", h.GetArtifactHandler)
+				r.Get("/reviews", h.ListArtifactReviews)
+				r.Post("/reviews", h.CreateReviewHandler)
+			})
+			// /api/runs/{runID}/start — kick off a ProjectRun via
+			// SchedulerService.ScheduleRun. Reads of runs themselves
+			// continue to live under /api/projects/{id}/runs.
+			r.Post("/api/runs/{runID}/start", h.StartRunHandler)
 
 			// Triggers (AgentMesh integration)
 			r.Post("/api/triggers/check-mentions", h.CheckMentions)
@@ -424,6 +483,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 			// Metrics (Phase 5)
 			r.Get("/api/metrics", h.GetWorkspaceMetrics)
 
+			// Activity log (Plan 4 — PRD §3)
+			r.Get("/api/activity-log", h.ListActivityLog)
+
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
@@ -434,6 +496,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Post("/archive-completed", h.ArchiveCompletedInbox)
 				r.Post("/{id}/read", h.MarkInboxRead)
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
+				// Plan 4 §8: actionable inbox items must be resolved
+				// with an explicit user-facing resolution.
+				r.Post("/{id}/resolve", h.ResolveInboxItem)
 			})
 		})
 	})

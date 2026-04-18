@@ -78,7 +78,13 @@ export function AccountRoute() {
           {agents.length === 0 ? (
             <EmptyState message="No agents connected yet." />
           ) : (
-            agents.map((agent) => <AgentCard key={agent.id} agent={agent} />)
+            agents.map((agent) => (
+              <AgentCard
+                key={agent.id}
+                agent={agent}
+                runtime={runtimes.find((r) => r.id === agent.runtime_id) ?? null}
+              />
+            ))
           )}
         </div>
       </section>
@@ -95,7 +101,18 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function AgentCard({ agent }: { agent: Agent }) {
+function AgentCard({
+  agent,
+  runtime,
+}: {
+  agent: Agent;
+  runtime: AgentRuntime | null;
+}) {
+  const onlineLabel = agent.status === "offline" ? "offline" : "online";
+  const workloadLabel =
+    agent.status === "offline" || agent.status === "online"
+      ? "idle"
+      : agent.status;
   return (
     <article className="rounded-3xl border border-border/70 bg-background/70 p-5">
       <div className="flex items-start justify-between gap-4">
@@ -108,9 +125,9 @@ function AgentCard({ agent }: { agent: Agent }) {
         </span>
       </div>
       <div className="mt-4 flex flex-wrap gap-2 text-xs text-muted-foreground">
-        <span className="rounded-full bg-white/5 px-3 py-1">{agent.runtime_mode}</span>
-        <span className="rounded-full bg-white/5 px-3 py-1">{agent.online_status ?? "unknown"}</span>
-        <span className="rounded-full bg-white/5 px-3 py-1">{agent.workload_status ?? "idle"}</span>
+        <span className="rounded-full bg-white/5 px-3 py-1">{runtime?.mode ?? "unknown"}</span>
+        <span className="rounded-full bg-white/5 px-3 py-1">{onlineLabel}</span>
+        <span className="rounded-full bg-white/5 px-3 py-1">{workloadLabel}</span>
       </div>
     </article>
   );

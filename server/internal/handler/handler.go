@@ -43,10 +43,16 @@ type Handler struct {
 	UpdateStore  *UpdateStore
 	Storage          *storage.S3Storage
 	CFSigner         *auth.CloudFrontSigner
+	Guards            auth.Guards
 	AutoReplyService  *service.AutoReplyService
 	PlanGenerator     *service.PlanGeneratorService
 	Scheduler         *service.SchedulerService
+	Slots             *service.SlotService
+	Artifacts         *service.ArtifactService
+	Reviews           *service.ReviewService
+	Quota             *service.QuotaService
 	IdentityGenerator *service.IdentityGeneratorService
+	Activity          *service.ActivityWriter
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, s3 *storage.S3Storage, cfSigner *auth.CloudFrontSigner) *Handler {
@@ -54,6 +60,15 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	if candidate, ok := txStarter.(dbExecutor); ok {
 		executor = candidate
 	}
+
+	// Plan 5 services: Slot/Artifact/Review/Quota are pre-built and shared.
+	// Scheduler depends on all of them and on the event bus + WS hub for
+	// task:status_changed and run:* notifications.
+	slots := service.NewSlotService(queries)
+	artifacts := service.NewArtifactService(queries)
+	reviews := service.NewReviewService(queries, slots)
+	quota := service.NewQuotaService(queries)
+	scheduler := service.NewSchedulerService(queries, slots, artifacts, reviews, quota, bus, hub)
 
 	return &Handler{
 		Queries:      queries,
@@ -67,6 +82,13 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		UpdateStore:  NewUpdateStore(),
 		Storage:      s3,
 		CFSigner:     cfSigner,
+		Guards:       auth.NewGuards(queries),
+		Slots:        slots,
+		Artifacts:    artifacts,
+		Reviews:      reviews,
+		Quota:        quota,
+		Scheduler:    scheduler,
+		Activity:     service.NewActivityWriter(queries),
 	}
 }
 

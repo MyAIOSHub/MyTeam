@@ -1,3 +1,31 @@
+// Package service: scheduler.go — SchedulerService orchestrates the Task /
+// ParticipantSlot / Execution state machines per Plan 5 PRD §9.3 + §5.
+//
+// Lifecycle:
+//
+//   ScheduleRun(plan,run): reset all tasks/slots, then ScheduleTask each
+//   task with no unmet depends_on dependencies.
+//
+//   ScheduleTask(task): activate before_execution slots; if a blocking
+//   human_input slot becomes ready the task transitions to needs_human and
+//   waits for the human. Otherwise pick an available agent (primary →
+//   fallback), create an Execution row, and put the task into queued.
+//
+//   HandleTaskCompletion(task,exec,result): mark agent_execution slot
+//   submitted, persist a result Artifact, activate before_done slots; if a
+//   human_review slot becomes ready the task moves to under_review and we
+//   wait for ReviewService to drive it forward. Otherwise the task is
+//   completed, downstream tasks whose deps are now satisfied are scheduled,
+//   and the run is checked for terminal state.
+//
+//   HandleTaskFailure(task,exec,err): retry within retry_rule.max_retries,
+//   then try the next fallback agent, then give up by setting the task to
+//   needs_attention. HandleTaskTimeout is the same path with err=timeout.
+//
+// Dependency direction: scheduler depends on Slots / Artifacts / Reviews /
+// Quota and publishes events through Bus + Hub. It does not call any of
+// these owners back — they only flow into the scheduler via the public
+// methods above.
 package service
 
 import (
@@ -5,619 +33,664 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// RetryRule defines the retry behaviour for a workflow step.
-type RetryRule struct {
+// Task status constants — mirror the CHECK constraint in migration 055.
+// (TaskStatusRunning / TaskStatusCompleted / TaskStatusNeedsAttention live
+// in review.go as the canonical home; we re-declare the rest here so the
+// state machine stays grep-able from this file.)
+const (
+	TaskStatusDraft       = "draft"
+	TaskStatusReady       = "ready"
+	TaskStatusQueued      = "queued"
+	TaskStatusAssigned    = "assigned"
+	TaskStatusNeedsHuman  = "needs_human"
+	TaskStatusUnderReview = "under_review"
+	TaskStatusFailed      = "failed"
+	TaskStatusCancelled   = "cancelled"
+)
+
+// TaskRetryRule mirrors task.retry_rule JSONB. Defaults match the SQL
+// default in migration 055 (max_retries=2, retry_delay_seconds=30).
+type TaskRetryRule struct {
 	MaxRetries        int `json:"max_retries"`
 	RetryDelaySeconds int `json:"retry_delay_seconds"`
 }
 
-// DefaultRetryRule returns the default retry rule per the spec.
-func DefaultRetryRule() RetryRule {
-	return RetryRule{MaxRetries: 2, RetryDelaySeconds: 30}
-}
-
-// TimeoutRule defines the timeout behaviour for a workflow step.
-type TimeoutRule struct {
+// TaskTimeoutRule mirrors task.timeout_rule JSONB. Defaults match the SQL
+// default (max_duration_seconds=1800, action="retry").
+type TaskTimeoutRule struct {
 	MaxDurationSeconds int    `json:"max_duration_seconds"`
-	Action             string `json:"action"` // "retry", "fail", or "escalate"
+	Action             string `json:"action"`
 }
 
-// DefaultTimeoutRule returns the default timeout rule per the spec.
-func DefaultTimeoutRule() TimeoutRule {
-	return TimeoutRule{MaxDurationSeconds: 1800, Action: "retry"}
-}
-
-// OwnerEscalationPolicy defines how to escalate to the owner.
-type OwnerEscalationPolicy struct {
+// TaskEscalationPolicy mirrors task.escalation_policy JSONB.
+type TaskEscalationPolicy struct {
 	EscalateAfterSeconds int    `json:"escalate_after_seconds"`
-	EscalateTo           string `json:"escalate_to"` // owner user ID
+	EscalateTo           string `json:"escalate_to"`
 }
 
-// DefaultOwnerEscalationPolicy returns the default escalation policy.
-func DefaultOwnerEscalationPolicy() OwnerEscalationPolicy {
-	return OwnerEscalationPolicy{EscalateAfterSeconds: 600}
-}
-
+// SchedulerService drives Task → Slot → Execution transitions.
 type SchedulerService struct {
-	Queries *db.Queries
-	Hub     *realtime.Hub
-	Bus     *events.Bus
+	Q         *db.Queries
+	Slots     *SlotService
+	Artifacts *ArtifactService
+	Reviews   *ReviewService
+	Quota     *QuotaService
+	Bus       *events.Bus
+	Hub       *realtime.Hub
 }
 
-func NewSchedulerService(q *db.Queries, hub *realtime.Hub) *SchedulerService {
-	return &SchedulerService{Queries: q, Hub: hub}
+// NewSchedulerService constructs a scheduler bound to its dependencies. All
+// dependencies (except Bus/Hub) should be non-nil; the scheduler degrades
+// gracefully when Bus or Hub is nil, but the slot/artifact/review/quota
+// services are core to the Task lifecycle.
+func NewSchedulerService(
+	q *db.Queries,
+	slots *SlotService,
+	artifacts *ArtifactService,
+	reviews *ReviewService,
+	quota *QuotaService,
+	bus *events.Bus,
+	hub *realtime.Hub,
+) *SchedulerService {
+	return &SchedulerService{
+		Q:         q,
+		Slots:     slots,
+		Artifacts: artifacts,
+		Reviews:   reviews,
+		Quota:     quota,
+		Bus:       bus,
+		Hub:       hub,
+	}
 }
 
-// ScheduleWorkflow starts executing a workflow, optionally tied to a project run.
-// runID may be empty for standalone workflow execution.
-func (s *SchedulerService) ScheduleWorkflow(ctx context.Context, workflowID string, runID string) error {
-	err := s.Queries.UpdateWorkflowStatus(ctx, db.UpdateWorkflowStatusParams{
-		ID:     util.ParseUUID(workflowID),
-		Status: "running",
-	})
+// ScheduleRun kicks off a Plan execution: it resets all tasks/slots back
+// to their initial state, then schedules each task whose depends_on are
+// satisfied (vacuously true for tasks with no deps).
+//
+// Per-task scheduling failures are logged and the loop continues so a
+// single bad task does not abort the whole run.
+func (s *SchedulerService) ScheduleRun(ctx context.Context, planID, runID uuid.UUID) error {
+	// 1. Reset all tasks for this plan to point at the new run + status=draft.
+	if err := s.Q.ResetTaskForNewRun(ctx, db.ResetTaskForNewRunParams{
+		RunID:  toPgUUID(runID),
+		PlanID: toPgUUID(planID),
+	}); err != nil {
+		return fmt.Errorf("reset tasks: %w", err)
+	}
+
+	// 2. Reset all slots for those tasks back to waiting.
+	tasks, err := s.Q.ListTasksByPlan(ctx, toPgUUID(planID))
 	if err != nil {
-		return fmt.Errorf("update workflow status: %w", err)
+		return fmt.Errorf("list tasks: %w", err)
 	}
-
-	steps, err := s.Queries.ListWorkflowSteps(ctx, util.ParseUUID(workflowID))
-	if err != nil {
-		return fmt.Errorf("list steps: %w", err)
+	taskIDs := make([]uuid.UUID, 0, len(tasks))
+	for _, t := range tasks {
+		if t.ID.Valid {
+			taskIDs = append(taskIDs, uuid.UUID(t.ID.Bytes))
+		}
 	}
-
-	if len(steps) == 0 {
-		return fmt.Errorf("workflow has no steps")
-	}
-
-	// Find steps with no dependencies and schedule them.
-	scheduled := 0
-	for _, step := range steps {
-		if len(step.DependsOn) == 0 {
-			go s.ScheduleStep(ctx, step, runID)
-			scheduled++
+	if s.Slots != nil {
+		if err := s.Slots.ResetForNewRun(ctx, taskIDs); err != nil {
+			slog.Warn("scheduler: slot reset failed", "plan_id", planID, "err", err)
 		}
 	}
 
-	if scheduled == 0 {
-		return fmt.Errorf("no schedulable steps found (all have dependencies)")
+	// 3. Move tasks with no unmet deps from draft → ready, then schedule.
+	for _, t := range tasks {
+		deps := pgUUIDsToUUIDs(t.DependsOn)
+		if !s.allDepsTerminal(tasks, deps) {
+			continue // Stays draft; will be scheduled when deps complete.
+		}
+		ready, err := s.Q.UpdateTaskStatus(ctx, db.UpdateTaskStatusParams{
+			ID:     t.ID,
+			Status: TaskStatusReady,
+		})
+		if err != nil {
+			slog.Warn("scheduler: mark ready failed", "task", uuid.UUID(t.ID.Bytes), "err", err)
+			continue
+		}
+		if err := s.ScheduleTask(ctx, ready); err != nil {
+			slog.Warn("scheduler: ScheduleTask failed", "task", uuid.UUID(t.ID.Bytes), "err", err)
+		}
 	}
-
-	slog.Info("workflow scheduled",
-		"workflow_id", workflowID,
-		"run_id", runID,
-		"total_steps", len(steps),
-		"initial_steps", scheduled,
-	)
-
 	return nil
 }
 
-// ScheduleStep dispatches a single workflow step to an agent.
-// It checks agent availability, tries fallbacks, and creates the task queue entry.
-func (s *SchedulerService) ScheduleStep(ctx context.Context, step db.WorkflowStep, runID string) {
-	stepID := util.UUIDToString(step.ID)
-	slog.Info("scheduling step", "step_id", stepID, "agent_id", util.UUIDToString(step.AgentID))
-
-	// Update step status to "queued".
-	s.Queries.UpdateWorkflowStepStatus(ctx, db.UpdateWorkflowStepStatusParams{
-		ID:     step.ID,
-		Status: "queued",
-		Result: nil,
-		Error:  pgtype.Text{},
-	})
-
-	// Validate agent is assigned.
-	if !step.AgentID.Valid {
-		s.failStep(ctx, step, "no agent assigned")
-		return
-	}
-
-	// Find an available agent (primary or fallback).
-	selectedAgentID, err := s.findAvailableAgent(ctx, step)
-	if err != nil {
-		s.failStep(ctx, step, err.Error())
-		return
-	}
-
-	// Create agent task queue entry linked to the workflow step.
-	_, taskErr := s.Queries.CreateWorkflowStepTask(ctx, db.CreateWorkflowStepTaskParams{
-		AgentID:        selectedAgentID,
-		Priority:       int32(step.StepOrder),
-		WorkflowStepID: pgtype.UUID{Bytes: step.ID.Bytes, Valid: true},
-		RunID:          pgtype.UUID{Bytes: util.ParseUUID(runID).Bytes, Valid: runID != ""},
-	})
-	if taskErr != nil {
-		slog.Error("failed to create task for workflow step", "step_id", stepID, "error", taskErr)
-		s.failStep(ctx, step, fmt.Sprintf("failed to create task: %s", taskErr))
-		return
-	}
-	slog.Info("created task for workflow step",
-		"step_id", stepID,
-		"agent_id", util.UUIDToString(selectedAgentID),
-		"run_id", runID,
-	)
-
-	// Update step status to "assigned".
-	s.Queries.UpdateWorkflowStepStatus(ctx, db.UpdateWorkflowStepStatusParams{
-		ID:     step.ID,
-		Status: "assigned",
-		Result: nil,
-		Error:  pgtype.Text{},
-	})
-
-	// Set actual_agent_id on the step.
-	s.Queries.UpdateWorkflowStepActualAgent(ctx, db.UpdateWorkflowStepActualAgentParams{
-		ID:            step.ID,
-		ActualAgentID: selectedAgentID,
-	})
-
-	// Broadcast step started event.
-	s.broadcastStepEvent(ctx, protocol.EventWorkflowStepStarted, step, map[string]any{
-		"agent_id": util.UUIDToString(selectedAgentID),
-		"run_id":   runID,
-	})
-}
-
-// findAvailableAgent checks the primary agent and fallbacks for availability.
-// Returns the UUID of the first available agent, or an error if none are available.
-func (s *SchedulerService) findAvailableAgent(ctx context.Context, step db.WorkflowStep) (pgtype.UUID, error) {
-	// Try primary agent first.
-	agent, err := s.Queries.GetAgent(ctx, step.AgentID)
-	if err == nil && isAgentAvailable(agent) {
-		return step.AgentID, nil
-	}
-
-	if err != nil {
-		slog.Warn("primary agent not found", "step_id", util.UUIDToString(step.ID), "agent_id", util.UUIDToString(step.AgentID), "error", err)
-	} else {
-		slog.Info("primary agent unavailable", "step_id", util.UUIDToString(step.ID), "agent_id", util.UUIDToString(step.AgentID), "status", agent.Status)
-	}
-
-	// Try fallback agents in order.
-	for _, fbID := range step.FallbackAgentIds {
-		fbAgent, fbErr := s.Queries.GetAgent(ctx, fbID)
-		if fbErr == nil && isAgentAvailable(fbAgent) {
-			slog.Info("using fallback agent", "step_id", util.UUIDToString(step.ID), "agent_id", util.UUIDToString(fbID))
-			return fbID, nil
+// ScheduleTask drives one task through the pre-execution side of the
+// state machine:
+//
+//  1. Activate before_execution slots (waiting → ready). If any blocking
+//     human_input slot becomes ready, the task transitions to needs_human
+//     and we return — the human's input will eventually trigger the next
+//     ScheduleTask.
+//  2. Find an available agent. If none, mark needs_attention.
+//  3. Create an Execution row pre-populated with the task payload and put
+//     the task into queued + assigned to the chosen agent.
+//
+// The actual execution.status transitions (claimed → running → completed)
+// are owned by the daemon / cloud executor.
+func (s *SchedulerService) ScheduleTask(ctx context.Context, task db.Task) error {
+	// 1. Activate before_execution slots.
+	var activated []db.ParticipantSlot
+	if s.Slots != nil {
+		var err error
+		activated, err = s.Slots.ActivateBeforeExecution(ctx, uuid.UUID(task.ID.Bytes))
+		if err != nil {
+			return fmt.Errorf("activate before_execution: %w", err)
 		}
 	}
 
-	return pgtype.UUID{}, fmt.Errorf("all agents unavailable (primary + %d fallbacks)", len(step.FallbackAgentIds))
+	// 2. If any blocking human_input slot is now ready, defer to the human.
+	for _, slot := range activated {
+		if slot.SlotType == SlotTypeHumanInput && slot.Blocking {
+			if _, err := s.Q.UpdateTaskStatus(ctx, db.UpdateTaskStatusParams{
+				ID:     task.ID,
+				Status: TaskStatusNeedsHuman,
+			}); err != nil {
+				return fmt.Errorf("set needs_human: %w", err)
+			}
+			s.publishTaskStatusChange(ctx, task, TaskStatusNeedsHuman)
+			return nil
+		}
+	}
+
+	// 3. Find an available agent.
+	agentID, runtimeID, ok := s.findAvailableAgent(ctx, task)
+	if !ok {
+		if _, err := s.Q.UpdateTaskStatus(ctx, db.UpdateTaskStatusParams{
+			ID:     task.ID,
+			Status: TaskStatusNeedsAttention,
+		}); err != nil {
+			return fmt.Errorf("set needs_attention: %w", err)
+		}
+		s.publishTaskStatusChange(ctx, task, TaskStatusNeedsAttention)
+		return nil
+	}
+
+	// 4. Build the execution payload.
+	payload, err := json.Marshal(map[string]any{
+		"task_id":             uuid.UUID(task.ID.Bytes).String(),
+		"title":               task.Title,
+		"description":         valOrEmpty(task.Description),
+		"acceptance_criteria": valOrEmpty(task.AcceptanceCriteria),
+		"input_context_refs":  rawJSONOrNull(task.InputContextRefs),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal execution payload: %w", err)
+	}
+
+	if _, err := s.Q.CreateExecution(ctx, db.CreateExecutionParams{
+		TaskID:    task.ID,
+		RunID:     task.RunID,
+		AgentID:   toPgUUID(agentID),
+		RuntimeID: toPgUUID(runtimeID),
+		Payload:   payload,
+	}); err != nil {
+		return fmt.Errorf("create execution: %w", err)
+	}
+
+	// 5. Assign agent + put task into queued.
+	if err := s.Q.AssignTaskAgent(ctx, db.AssignTaskAgentParams{
+		ID:            task.ID,
+		ActualAgentID: toPgUUID(agentID),
+	}); err != nil {
+		return fmt.Errorf("assign agent: %w", err)
+	}
+	if _, err := s.Q.UpdateTaskStatus(ctx, db.UpdateTaskStatusParams{
+		ID:     task.ID,
+		Status: TaskStatusQueued,
+	}); err != nil {
+		return fmt.Errorf("set queued: %w", err)
+	}
+	s.publishTaskStatusChange(ctx, task, TaskStatusQueued)
+	return nil
 }
 
-// isAgentAvailable checks if an agent can accept new tasks.
-func isAgentAvailable(agent db.Agent) bool {
-	// Agent must not be archived.
-	if agent.ArchivedAt.Valid {
-		return false
-	}
-	// Check status: "idle" or "working" (which maps to the "busy" concept but allows concurrent tasks).
-	return agent.Status == "idle" || agent.Status == "working" || agent.Status == "online"
-}
-
-// HandleStepCompletion processes a completed step, triggers dependent steps,
-// and checks if the workflow/run is complete.
-func (s *SchedulerService) HandleStepCompletion(ctx context.Context, stepID string, result json.RawMessage) error {
-	// Update step status to "completed".
-	s.Queries.UpdateWorkflowStepStatus(ctx, db.UpdateWorkflowStepStatusParams{
-		ID:     util.ParseUUID(stepID),
-		Status: "completed",
-		Result: result,
-		Error:  pgtype.Text{},
-	})
-
-	step, err := s.Queries.GetWorkflowStep(ctx, util.ParseUUID(stepID))
+// HandleTaskCompletion is invoked when an Execution finishes successfully.
+// It assumes the caller has already marked the Execution row completed.
+//
+//  1. Mark the agent_execution slot submitted (it was in ready/in_progress).
+//  2. Persist a result Artifact when result is non-empty.
+//  3. Activate before_done slots; if a human_review slot becomes ready the
+//     task transitions to under_review and we wait for ReviewService.
+//  4. Otherwise the task is completed; cascade to downstream tasks whose
+//     deps are now satisfied, and check whether the run itself is done.
+func (s *SchedulerService) HandleTaskCompletion(ctx context.Context, taskID, executionID uuid.UUID, result map[string]any) error {
+	task, err := s.Q.GetTask(ctx, toPgUUID(taskID))
 	if err != nil {
-		return fmt.Errorf("get step: %w", err)
+		return fmt.Errorf("get task: %w", err)
 	}
 
-	slog.Info("step completed", "step_id", stepID, "workflow_id", util.UUIDToString(step.WorkflowID))
-
-	// TODO: Update step output_refs when the column exists in sqlc types.
-
-	// Broadcast step completed event.
-	s.broadcastStepEvent(ctx, protocol.EventWorkflowStepCompleted, step, map[string]any{
-		"result": result,
-	})
-
-	// Get all steps in the workflow to check dependencies and completion.
-	steps, err := s.Queries.ListWorkflowSteps(ctx, step.WorkflowID)
-	if err != nil {
-		return fmt.Errorf("list steps: %w", err)
-	}
-
-	// Build a map of step ID -> status for dependency checking.
-	stepStatusMap := make(map[string]string, len(steps))
-	for _, st := range steps {
-		stepStatusMap[util.UUIDToString(st.ID)] = st.Status
-	}
-
-	// Find pending steps whose dependencies are now all satisfied.
-	for _, pendingStep := range steps {
-		if pendingStep.Status != "pending" {
-			continue
+	// 1. Mark agent_execution slot submitted (best-effort).
+	if s.Slots != nil {
+		slots, err := s.Q.ListSlotsByTask(ctx, task.ID)
+		if err != nil {
+			slog.Warn("scheduler: list slots for completion failed", "task", taskID, "err", err)
 		}
-		if len(pendingStep.DependsOn) == 0 {
-			continue // Should have been scheduled already.
-		}
-
-		allDepsCompleted := true
-		for _, depID := range pendingStep.DependsOn {
-			depStatus, exists := stepStatusMap[util.UUIDToString(depID)]
-			if !exists || depStatus != "completed" {
-				allDepsCompleted = false
-				break
+		for _, slot := range slots {
+			if slot.SlotType != SlotTypeAgentExecution {
+				continue
+			}
+			if slot.Status != SlotStatusReady && slot.Status != SlotStatusInProgress {
+				continue
+			}
+			if _, err := s.Slots.MarkSubmitted(ctx, uuid.UUID(slot.ID.Bytes)); err != nil {
+				slog.Warn("scheduler: mark agent_execution submitted failed",
+					"slot", slot.ID, "err", err)
 			}
 		}
+	}
 
-		if allDepsCompleted {
-			slog.Info("dependencies satisfied, scheduling step",
-				"step_id", util.UUIDToString(pendingStep.ID),
-				"workflow_id", util.UUIDToString(step.WorkflowID),
-			)
-			// TODO: Pass actual run_id when available on the step.
-			go s.ScheduleStep(ctx, pendingStep, "")
+	// 2. Persist a result Artifact if a payload was provided.
+	if len(result) > 0 && s.Artifacts != nil {
+		var createdByID uuid.UUID
+		if task.ActualAgentID.Valid {
+			createdByID = uuid.UUID(task.ActualAgentID.Bytes)
+		}
+		if _, err := s.Artifacts.CreateHeadless(ctx, CreateHeadlessRequest{
+			TaskID:        taskID,
+			ExecutionID:   executionID,
+			RunID:         pgUUIDToUUID(task.RunID),
+			ArtifactType:  ArtifactTypeReport,
+			Title:         task.Title,
+			Content:       result,
+			CreatedByID:   createdByID,
+			CreatedByType: "agent",
+		}); err != nil {
+			slog.Warn("scheduler: create artifact failed", "task", taskID, "err", err)
 		}
 	}
 
-	// Check if all steps are done (completed or failed).
-	allDone := true
-	allSucceeded := true
-	for _, st := range steps {
-		switch st.Status {
-		case "completed":
-			// OK
-		case "failed", "cancelled":
-			allSucceeded = false
+	// 3. Activate before_done slots. The activated slice tells us which
+	//    slots were *flipped* this call — useful for logging/notifications
+	//    but NOT for deciding whether the task can complete: a previous
+	//    HandleTaskCompletion invocation may have already activated the
+	//    blocking review slots, so a second call would see activated=[]
+	//    and incorrectly fall through to TaskStatusCompleted, silently
+	//    bypassing the human review gate. Query the slot table directly.
+	if s.Slots != nil {
+		_, _ = s.Slots.ActivateBeforeDone(ctx, taskID)
+	}
+	blockingReviewCount, err := s.Q.CountBlockingReviewSlots(ctx, task.ID)
+	if err != nil {
+		return fmt.Errorf("count blocking review slots: %w", err)
+	}
+
+	newStatus := TaskStatusCompleted
+	if blockingReviewCount > 0 {
+		newStatus = TaskStatusUnderReview
+	}
+	if _, err := s.Q.UpdateTaskStatus(ctx, db.UpdateTaskStatusParams{
+		ID:     task.ID,
+		Status: newStatus,
+	}); err != nil {
+		return fmt.Errorf("update task status: %w", err)
+	}
+	s.publishTaskStatusChange(ctx, task, newStatus)
+
+	// 4. If the task is fully done, schedule downstream tasks + check run.
+	if newStatus == TaskStatusCompleted {
+		s.scheduleDownstreamReady(ctx, task)
+		if err := s.checkRunCompletion(ctx, pgUUIDToUUID(task.RunID)); err != nil {
+			slog.Warn("scheduler: run completion check failed",
+				"run", task.RunID, "err", err)
+		}
+	}
+	return nil
+}
+
+// HandleTaskFailure applies the retry policy when an Execution fails.
+//
+//  1. If current_retry < retry_rule.max_retries → IncrementTaskRetry and
+//     re-ScheduleTask (with the same agent, since we haven't exhausted
+//     retries on it yet).
+//  2. Else if a fallback agent is available → switch to it and reset the
+//     retry counter, then re-ScheduleTask.
+//  3. Else mark the task needs_attention and persist the error message.
+//
+// TODO(plan5): create an inbox notification for the task owner when we
+// fall through to needs_attention. Wired in a follow-up batch.
+func (s *SchedulerService) HandleTaskFailure(ctx context.Context, taskID, executionID uuid.UUID, errorMsg string) error {
+	_ = executionID // reserved for future per-execution audit; current path acts on Task.
+	task, err := s.Q.GetTask(ctx, toPgUUID(taskID))
+	if err != nil {
+		return fmt.Errorf("get task: %w", err)
+	}
+
+	// Parse retry policy (default if JSON is empty/invalid).
+	retryRule := TaskRetryRule{MaxRetries: 2, RetryDelaySeconds: 30}
+	if len(task.RetryRule) > 0 {
+		if err := json.Unmarshal(task.RetryRule, &retryRule); err != nil {
+			slog.Warn("scheduler: parse retry_rule failed, using defaults",
+				"task", taskID, "err", err)
+		}
+	}
+
+	// 1. Retry on the same agent if we have budget left.
+	if int(task.CurrentRetry) < retryRule.MaxRetries {
+		if err := s.Q.IncrementTaskRetry(ctx, task.ID); err != nil {
+			return fmt.Errorf("increment retry: %w", err)
+		}
+		// Re-schedule with the same agent (the existing primary/fallback set
+		// will pick the same one). ScheduleTask creates a fresh Execution row.
+		return s.ScheduleTask(ctx, task)
+	}
+
+	// 2. Try the next fallback agent (skipping the one that just failed).
+	for _, fbBytes := range task.FallbackAgentIds {
+		if !fbBytes.Valid {
+			continue
+		}
+		fbID := uuid.UUID(fbBytes.Bytes)
+		if task.ActualAgentID.Valid && fbBytes.Bytes == task.ActualAgentID.Bytes {
+			continue
+		}
+		if err := s.Q.AssignTaskAgent(ctx, db.AssignTaskAgentParams{
+			ID:            task.ID,
+			ActualAgentID: toPgUUID(fbID),
+		}); err != nil {
+			slog.Warn("scheduler: assign fallback agent failed",
+				"task", taskID, "fallback", fbID, "err", err)
+			continue
+		}
+		// Re-fetch so we have the updated actual_agent_id when computing
+		// candidates inside ScheduleTask.
+		updated, getErr := s.Q.GetTask(ctx, task.ID)
+		if getErr != nil {
+			slog.Warn("scheduler: re-fetch task for fallback failed",
+				"task", taskID, "err", getErr)
+			updated = task
+		}
+		return s.ScheduleTask(ctx, updated)
+	}
+
+	// 3. Out of options → needs_attention.
+	if err := s.Q.SetTaskError(ctx, db.SetTaskErrorParams{
+		ID:     task.ID,
+		Status: TaskStatusNeedsAttention,
+		Error:  toPgNullText(errorMsg),
+	}); err != nil {
+		return fmt.Errorf("set task error: %w", err)
+	}
+	s.publishTaskStatusChange(ctx, task, TaskStatusNeedsAttention)
+	// TODO(plan5): create an inbox notification for the task owner.
+	return nil
+}
+
+// HandleTaskTimeout is the entry point for the lifecycle ticker when it
+// detects a task whose execution has exceeded its timeout. Currently this
+// is just HandleTaskFailure with a fixed error string; per PRD §5.4 the
+// timeout_rule.action ("retry"|"fail"|"escalate") will eventually steer
+// behaviour here.
+func (s *SchedulerService) HandleTaskTimeout(ctx context.Context, taskID uuid.UUID) error {
+	return s.HandleTaskFailure(ctx, taskID, uuid.Nil, "task timeout")
+}
+
+// findAvailableAgent walks the task's agent candidates and returns the
+// first one whose Agent.status is idle/busy AND its runtime is online/
+// degraded AND the runtime has spare capacity (current_load <
+// concurrency_limit).
+//
+// Candidate order: actual_agent_id (when set, so a fallback chosen by
+// HandleTaskFailure stays sticky on the next ScheduleTask), then the
+// primary, then the fallback list. Duplicates are skipped.
+//
+// Returns (agentID, runtimeID, true) on success and (uuid.Nil, uuid.Nil,
+// false) when no candidate qualifies.
+func (s *SchedulerService) findAvailableAgent(ctx context.Context, task db.Task) (uuid.UUID, uuid.UUID, bool) {
+	candidates := make([]pgtype.UUID, 0, 2+len(task.FallbackAgentIds))
+	if task.ActualAgentID.Valid {
+		candidates = append(candidates, task.ActualAgentID)
+	}
+	if task.PrimaryAssigneeID.Valid {
+		candidates = append(candidates, task.PrimaryAssigneeID)
+	}
+	for _, fb := range task.FallbackAgentIds {
+		if fb.Valid {
+			candidates = append(candidates, fb)
+		}
+	}
+
+	seen := make(map[[16]byte]bool, len(candidates))
+	for _, candID := range candidates {
+		if seen[candID.Bytes] {
+			continue
+		}
+		seen[candID.Bytes] = true
+		agent, err := s.Q.GetAgent(ctx, candID)
+		if err != nil {
+			continue
+		}
+		if agent.Status != "idle" && agent.Status != "busy" {
+			continue
+		}
+		if !agent.RuntimeID.Valid {
+			continue
+		}
+		runtime, err := s.Q.GetAgentRuntime(ctx, agent.RuntimeID)
+		if err != nil {
+			continue
+		}
+		if runtime.Status != "online" && runtime.Status != "degraded" {
+			continue
+		}
+		if runtime.CurrentLoad >= runtime.ConcurrencyLimit {
+			continue
+		}
+		return uuid.UUID(agent.ID.Bytes), uuid.UUID(runtime.ID.Bytes), true
+	}
+	return uuid.Nil, uuid.Nil, false
+}
+
+// scheduleDownstreamReady is called after a task completes to look at the
+// task's run-mates and ScheduleTask any that were waiting on this task.
+// It only considers tasks still in draft — tasks already in flight or
+// terminal are left alone.
+func (s *SchedulerService) scheduleDownstreamReady(ctx context.Context, completed db.Task) {
+	if !completed.RunID.Valid {
+		return
+	}
+	tasks, err := s.Q.ListTasksByRun(ctx, completed.RunID)
+	if err != nil {
+		slog.Warn("scheduler: list tasks for downstream check failed",
+			"run", completed.RunID, "err", err)
+		return
+	}
+	for _, t := range tasks {
+		if t.Status != TaskStatusDraft {
+			continue
+		}
+		deps := pgUUIDsToUUIDs(t.DependsOn)
+		if !s.allDepsTerminal(tasks, deps) {
+			continue
+		}
+		ready, err := s.Q.UpdateTaskStatus(ctx, db.UpdateTaskStatusParams{
+			ID:     t.ID,
+			Status: TaskStatusReady,
+		})
+		if err != nil {
+			slog.Warn("scheduler: mark downstream ready failed",
+				"task", t.ID, "err", err)
+			continue
+		}
+		if err := s.ScheduleTask(ctx, ready); err != nil {
+			slog.Warn("scheduler: schedule downstream failed",
+				"task", t.ID, "err", err)
+		}
+	}
+}
+
+// checkRunCompletion inspects every task in the run and, when all of them
+// are in terminal state, transitions the ProjectRun to completed (when all
+// tasks completed) or failed (when any task ended in failed/cancelled).
+// While any task is non-terminal the run stays as it is.
+func (s *SchedulerService) checkRunCompletion(ctx context.Context, runID uuid.UUID) error {
+	if runID == uuid.Nil {
+		return nil
+	}
+	tasks, err := s.Q.ListTasksByRun(ctx, toPgUUID(runID))
+	if err != nil {
+		return fmt.Errorf("list tasks: %w", err)
+	}
+	if len(tasks) == 0 {
+		return nil
+	}
+	allTerminal := true
+	anyFailed := false
+	for _, t := range tasks {
+		switch t.Status {
+		case TaskStatusCompleted:
+			// terminal-success
+		case TaskStatusFailed, TaskStatusCancelled:
+			anyFailed = true
 		default:
-			allDone = false
-			allSucceeded = false
+			allTerminal = false
 		}
 	}
-
-	if allDone {
-		workflowStatus := "completed"
-		if !allSucceeded {
-			workflowStatus = "failed"
+	if !allTerminal {
+		return nil
+	}
+	newStatus := "completed"
+	if anyFailed {
+		newStatus = "failed"
+	}
+	if err := s.Q.UpdateProjectRunStatus(ctx, db.UpdateProjectRunStatusParams{
+		ID:     toPgUUID(runID),
+		Status: newStatus,
+	}); err != nil {
+		return fmt.Errorf("update run status: %w", err)
+	}
+	if s.Bus != nil {
+		eventType := "run:completed"
+		if anyFailed {
+			eventType = "run:failed"
 		}
-
-		s.Queries.UpdateWorkflowStatus(ctx, db.UpdateWorkflowStatusParams{
-			ID:     step.WorkflowID,
-			Status: workflowStatus,
-		})
-
-		slog.Info("workflow finished",
-			"workflow_id", util.UUIDToString(step.WorkflowID),
-			"status", workflowStatus,
-		)
-
-		// Broadcast workflow completed event.
-		if s.Bus != nil {
-			wf, wfErr := s.Queries.GetWorkflow(ctx, step.WorkflowID)
-			if wfErr == nil {
-				s.Bus.Publish(events.Event{
-					Type:        protocol.EventWorkflowCompleted,
-					WorkspaceID: util.UUIDToString(wf.WorkspaceID),
-					ActorType:   "system",
-					ActorID:     "",
-					Payload: map[string]any{
-						"workflow_id": util.UUIDToString(step.WorkflowID),
-						"status":      workflowStatus,
-					},
-				})
+		// Resolve workspace_id from run → project. AuditService and
+		// ResultsReporterService both depend on event.WorkspaceID being set;
+		// a missing value cascades into "audit log failed: null value in
+		// column workspace_id" warnings and leaves the activity_log row
+		// uncreated. Failure here is non-fatal — the event still publishes.
+		var workspaceID string
+		if run, runErr := s.Q.GetProjectRun(ctx, toPgUUID(runID)); runErr == nil {
+			if project, projErr := s.Q.GetProject(ctx, run.ProjectID); projErr == nil {
+				workspaceID = util.UUIDToString(project.WorkspaceID)
+			} else {
+				slog.Warn("scheduler: load project for run completion event failed",
+					"run", runID, "err", projErr)
 			}
+		} else {
+			slog.Warn("scheduler: load run for completion event failed",
+				"run", runID, "err", runErr)
 		}
-
-		// TODO: Update project run status when run_id is available on steps.
-		// s.updateProjectRunStatus(ctx, runID, workflowStatus)
+		s.Bus.Publish(events.Event{
+			Type:        eventType,
+			WorkspaceID: workspaceID,
+			ActorType:   "system",
+			Payload: map[string]any{
+				"run_id": runID.String(),
+				"status": newStatus,
+			},
+		})
 	}
-
 	return nil
 }
 
-// HandleStepFailure processes a failed step with retry and fallback logic.
-func (s *SchedulerService) HandleStepFailure(ctx context.Context, stepID string, errMsg string) error {
-	step, err := s.Queries.GetWorkflowStep(ctx, util.ParseUUID(stepID))
-	if err != nil {
-		return fmt.Errorf("get step: %w", err)
+// allDepsTerminal returns true when every dep UUID in deps maps to a task
+// in completed status. Failed/cancelled deps return false — those will be
+// handled by checkRunCompletion's run-level rollup, not by skipping the
+// downstream task.
+func (s *SchedulerService) allDepsTerminal(allTasks []db.Task, deps []uuid.UUID) bool {
+	if len(deps) == 0 {
+		return true
 	}
-
-	slog.Warn("handling step failure", "step_id", stepID, "error", errMsg)
-
-	// Parse retry rule from step.
-	retryRule := DefaultRetryRule()
-	if len(step.RetryRule) > 2 { // skip empty "{}"
-		json.Unmarshal(step.RetryRule, &retryRule)
+	byID := make(map[[16]byte]db.Task, len(allTasks))
+	for _, t := range allTasks {
+		if t.ID.Valid {
+			byID[t.ID.Bytes] = t
+		}
 	}
-
-	// Get current retry count.
-	currentRetry := int32(0)
-	if step.RetryCount.Valid {
-		currentRetry = step.RetryCount.Int32
+	for _, d := range deps {
+		t, ok := byID[d]
+		if !ok || t.Status != TaskStatusCompleted {
+			return false
+		}
 	}
-
-	// Check if we can retry with the current agent.
-	if int(currentRetry) < retryRule.MaxRetries {
-		slog.Info("retrying step",
-			"step_id", stepID,
-			"retry", currentRetry+1,
-			"max_retries", retryRule.MaxRetries,
-		)
-
-		// Update step status to "retrying" and increment retry count.
-		s.Queries.UpdateWorkflowStepStatus(ctx, db.UpdateWorkflowStepStatusParams{
-			ID:     step.ID,
-			Status: "retrying",
-			Result: nil,
-			Error:  pgtype.Text{String: errMsg, Valid: true},
-		})
-
-		// Increment retry count on the step.
-		s.Queries.IncrementWorkflowStepRetry(ctx, step.ID)
-
-		// Schedule retry after delay (with exponential backoff per spec F3).
-		delay := retryRule.RetryDelaySeconds
-		if currentRetry > 0 {
-			// Exponential backoff: delay * 2^(retry_count - 1)
-			delay = retryRule.RetryDelaySeconds * (1 << currentRetry)
-		}
-
-		go func() {
-			timer := time.NewTimer(time.Duration(delay) * time.Second)
-			defer timer.Stop()
-			<-timer.C
-
-			slog.Info("retry timer fired, re-scheduling step", "step_id", stepID)
-			// Re-fetch step to get latest state.
-			freshStep, freshErr := s.Queries.GetWorkflowStep(context.Background(), step.ID)
-			if freshErr != nil {
-				slog.Error("retry: failed to re-fetch step", "step_id", stepID, "error", freshErr)
-				return
-			}
-			// Only reschedule if still in "retrying" state (not cancelled/manually resolved).
-			if freshStep.Status == "retrying" {
-				// TODO: Pass actual run_id when available.
-				s.ScheduleStep(context.Background(), freshStep, "")
-			}
-		}()
-
-		// Broadcast step retrying event.
-		s.broadcastStepEvent(ctx, protocol.EventWorkflowStepFailed, step, map[string]any{
-			"error":       errMsg,
-			"retry_count": currentRetry + 1,
-			"max_retries": retryRule.MaxRetries,
-			"action":      "retrying",
-		})
-
-		return nil
-	}
-
-	// Retries exhausted. Try fallback agents.
-	slog.Info("retries exhausted, trying fallback agents", "step_id", stepID)
-
-	for _, fbID := range step.FallbackAgentIds {
-		// Skip the current primary agent.
-		if fbID == step.AgentID {
-			continue
-		}
-
-		fbAgent, fbErr := s.Queries.GetAgent(ctx, fbID)
-		if fbErr != nil {
-			continue
-		}
-		if !isAgentAvailable(fbAgent) {
-			slog.Info("fallback agent unavailable", "step_id", stepID, "agent_id", util.UUIDToString(fbID))
-			continue
-		}
-
-		slog.Info("assigning fallback agent",
-			"step_id", stepID,
-			"original_agent", util.UUIDToString(step.AgentID),
-			"fallback_agent", util.UUIDToString(fbID),
-		)
-
-		// Reset step for new agent: set status back to "queued" and reset retry count.
-		s.Queries.UpdateWorkflowStepStatus(ctx, db.UpdateWorkflowStepStatusParams{
-			ID:     step.ID,
-			Status: "queued",
-			Result: nil,
-			Error:  pgtype.Text{},
-		})
-		// Set actual_agent_id to the fallback agent.
-		s.Queries.UpdateWorkflowStepActualAgent(ctx, db.UpdateWorkflowStepActualAgentParams{
-			ID:            step.ID,
-			ActualAgentID: fbID,
-		})
-
-		// Re-fetch step and schedule with new agent.
-		freshStep, freshErr := s.Queries.GetWorkflowStep(ctx, step.ID)
-		if freshErr != nil {
-			return fmt.Errorf("re-fetch step for fallback: %w", freshErr)
-		}
-		go s.ScheduleStep(ctx, freshStep, "")
-		return nil
-	}
-
-	// All fallbacks exhausted. Apply owner escalation policy.
-	slog.Warn("all fallback agents exhausted, escalating to owner",
-		"step_id", stepID,
-		"workflow_id", util.UUIDToString(step.WorkflowID),
-	)
-
-	// Mark step as "failed".
-	s.failStep(ctx, step, fmt.Sprintf("all retries and fallbacks exhausted: %s", errMsg))
-
-	// Broadcast final failure event.
-	s.broadcastStepEvent(ctx, protocol.EventWorkflowStepFailed, step, map[string]any{
-		"error":  errMsg,
-		"action": "failed",
-		"final":  true,
-	})
-
-	// TODO: Create escalation inbox item when inbox supports action_required fields.
-	// s.createEscalationInboxItem(ctx, step, errMsg)
-
-	// TODO: Send message to project channel.
-	// s.sendProjectChannelMessage(ctx, step, errMsg)
-
-	// Check if this failure should mark the workflow/run as failed.
-	s.checkWorkflowFailure(ctx, step)
-
-	return nil
+	return true
 }
 
-// HandleStepTimeout handles a step that has exceeded its timeout.
-func (s *SchedulerService) HandleStepTimeout(ctx context.Context, stepID string) error {
-	step, err := s.Queries.GetWorkflowStep(ctx, util.ParseUUID(stepID))
-	if err != nil {
-		return fmt.Errorf("get step: %w", err)
-	}
-
-	slog.Warn("step timed out", "step_id", stepID)
-
-	// Parse timeout rule from step.
-	timeoutRule := DefaultTimeoutRule()
-	if len(step.TimeoutRule) > 2 { // skip empty "{}"
-		json.Unmarshal(step.TimeoutRule, &timeoutRule)
-	}
-
-	// Update step status to "timeout".
-	s.Queries.UpdateWorkflowStepStatus(ctx, db.UpdateWorkflowStepStatusParams{
-		ID:     step.ID,
-		Status: "timeout",
-		Result: nil,
-		Error:  pgtype.Text{String: "step timed out", Valid: true},
-	})
-
-	switch timeoutRule.Action {
-	case "retry":
-		// Treat like a failure and use retry logic.
-		return s.HandleStepFailure(ctx, stepID, "step timed out")
-
-	case "fail":
-		// Mark as failed and trigger escalation.
-		s.failStep(ctx, step, "step timed out (action: fail)")
-		s.broadcastStepEvent(ctx, protocol.EventWorkflowStepFailed, step, map[string]any{
-			"error":  "step timed out",
-			"action": "failed",
-			"final":  true,
-		})
-		s.checkWorkflowFailure(ctx, step)
-		return nil
-
-	case "escalate":
-		// Notify owner without failing the step.
-		slog.Warn("step timed out, escalating to owner", "step_id", stepID)
-		// TODO: Create escalation inbox item.
-		// TODO: Send message to project channel.
-		s.broadcastStepEvent(ctx, protocol.EventWorkflowStepFailed, step, map[string]any{
-			"error":  "step timed out (escalated to owner)",
-			"action": "escalated",
-		})
-		return nil
-
-	default:
-		// Default to retry.
-		return s.HandleStepFailure(ctx, stepID, "step timed out")
-	}
-}
-
-// failStep marks a step as failed with the given error message.
-func (s *SchedulerService) failStep(ctx context.Context, step db.WorkflowStep, errMsg string) {
-	s.Queries.UpdateWorkflowStepStatus(ctx, db.UpdateWorkflowStepStatusParams{
-		ID:     step.ID,
-		Status: "failed",
-		Result: nil,
-		Error:  pgtype.Text{String: errMsg, Valid: true},
-	})
-	slog.Warn("step failed", "step_id", util.UUIDToString(step.ID), "error", errMsg)
-}
-
-// checkWorkflowFailure checks if a step failure should cascade to workflow/run failure.
-func (s *SchedulerService) checkWorkflowFailure(ctx context.Context, failedStep db.WorkflowStep) {
-	steps, err := s.Queries.ListWorkflowSteps(ctx, failedStep.WorkflowID)
-	if err != nil {
-		slog.Error("failed to list steps for workflow failure check", "error", err)
-		return
-	}
-
-	// Check if there are any still-active steps.
-	hasActive := false
-	for _, st := range steps {
-		switch st.Status {
-		case "pending", "queued", "assigned", "running", "retrying", "waiting_input":
-			hasActive = true
-		}
-	}
-
-	// If no active steps remain, the workflow is done (with failures).
-	if !hasActive {
-		s.Queries.UpdateWorkflowStatus(ctx, db.UpdateWorkflowStatusParams{
-			ID:     failedStep.WorkflowID,
-			Status: "failed",
-		})
-
-		slog.Warn("workflow failed due to step failure",
-			"workflow_id", util.UUIDToString(failedStep.WorkflowID),
-		)
-
-		if s.Bus != nil {
-			wf, wfErr := s.Queries.GetWorkflow(ctx, failedStep.WorkflowID)
-			if wfErr == nil {
-				s.Bus.Publish(events.Event{
-					Type:        protocol.EventWorkflowCompleted,
-					WorkspaceID: util.UUIDToString(wf.WorkspaceID),
-					ActorType:   "system",
-					ActorID:     "",
-					Payload: map[string]any{
-						"workflow_id": util.UUIDToString(failedStep.WorkflowID),
-						"status":      "failed",
-					},
-				})
-			}
-		}
-
-		// TODO: Update project run status to "failed" when run_id is available.
-	}
-}
-
-// broadcastStepEvent publishes a workflow step event via the event bus.
-func (s *SchedulerService) broadcastStepEvent(ctx context.Context, eventType string, step db.WorkflowStep, extra map[string]any) {
+// publishTaskStatusChange emits a task:status_changed event so the rest of
+// the system can react (UI, notifiers, etc). Bus is optional — nil bus is
+// a silent no-op so unit tests can run without wiring an event bus.
+func (s *SchedulerService) publishTaskStatusChange(_ context.Context, task db.Task, newStatus string) {
 	if s.Bus == nil {
 		return
 	}
-
-	wf, err := s.Queries.GetWorkflow(ctx, step.WorkflowID)
-	if err != nil {
-		slog.Warn("broadcast step event: workflow not found", "workflow_id", util.UUIDToString(step.WorkflowID))
-		return
-	}
-
 	payload := map[string]any{
-		"workflow_id": util.UUIDToString(step.WorkflowID),
-		"step_id":     util.UUIDToString(step.ID),
-		"step_order":  step.StepOrder,
-		"description": step.Description,
-		"status":      step.Status,
+		"task_id": uuid.UUID(task.ID.Bytes).String(),
+		"to":      newStatus,
 	}
-	for k, v := range extra {
-		payload[k] = v
+	if task.RunID.Valid {
+		payload["run_id"] = uuid.UUID(task.RunID.Bytes).String()
 	}
-
+	workspaceID := ""
+	if task.WorkspaceID.Valid {
+		workspaceID = uuid.UUID(task.WorkspaceID.Bytes).String()
+	}
 	s.Bus.Publish(events.Event{
-		Type:        eventType,
-		WorkspaceID: util.UUIDToString(wf.WorkspaceID),
+		Type:        "task:status_changed",
+		WorkspaceID: workspaceID,
 		ActorType:   "system",
-		ActorID:     "",
 		Payload:     payload,
 	})
+}
+
+// valOrEmpty returns the underlying string for a possibly-NULL pgtype.Text,
+// using "" as the fallback. Used when serializing task fields into the
+// execution payload.
+func valOrEmpty(t pgtype.Text) string {
+	if t.Valid {
+		return t.String
+	}
+	return ""
+}
+
+// rawJSONOrNull returns the underlying byte slice for a JSONB column when
+// non-empty, or json.RawMessage("null") so the marshaled execution payload
+// stays valid JSON when the column is empty.
+func rawJSONOrNull(b []byte) json.RawMessage {
+	if len(b) == 0 {
+		return json.RawMessage("null")
+	}
+	return json.RawMessage(b)
+}
+
+// pgUUIDToUUID converts a pgtype.UUID to a uuid.UUID, returning uuid.Nil
+// for NULL/invalid input.
+func pgUUIDToUUID(p pgtype.UUID) uuid.UUID {
+	if !p.Valid {
+		return uuid.Nil
+	}
+	return uuid.UUID(p.Bytes)
+}
+
+// pgUUIDsToUUIDs converts a slice of pgtype.UUID to a slice of uuid.UUID,
+// dropping NULL entries.
+func pgUUIDsToUUIDs(ps []pgtype.UUID) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(ps))
+	for _, p := range ps {
+		if p.Valid {
+			out = append(out, uuid.UUID(p.Bytes))
+		}
+	}
+	return out
 }

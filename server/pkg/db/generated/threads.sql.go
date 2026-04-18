@@ -11,6 +11,75 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createThread = `-- name: CreateThread :one
+
+INSERT INTO thread (
+    id, channel_id, workspace_id, root_message_id, issue_id,
+    title, status, created_by, created_by_type, metadata,
+    reply_count, last_reply_at, last_activity_at, created_at
+) VALUES (
+    COALESCE($1::uuid, gen_random_uuid()),
+    $2,
+    $3,
+    $4,
+    $5,
+    $6,
+    COALESCE($7::text, 'active'),
+    $8,
+    $9,
+    COALESCE($10::jsonb, '{}'::jsonb),
+    0, NULL, now(), now()
+)
+RETURNING id, channel_id, title, reply_count, last_reply_at, created_at, workspace_id, root_message_id, issue_id, created_by, created_by_type, status, metadata, last_activity_at
+`
+
+type CreateThreadParams struct {
+	ID            pgtype.UUID `json:"id"`
+	ChannelID     pgtype.UUID `json:"channel_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RootMessageID pgtype.UUID `json:"root_message_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+	Title         pgtype.Text `json:"title"`
+	Status        pgtype.Text `json:"status"`
+	CreatedBy     pgtype.UUID `json:"created_by"`
+	CreatedByType pgtype.Text `json:"created_by_type"`
+	Metadata      []byte      `json:"metadata"`
+}
+
+// ===== Plan 3 / Phase 1: Thread extension =====
+func (q *Queries) CreateThread(ctx context.Context, arg CreateThreadParams) (Thread, error) {
+	row := q.db.QueryRow(ctx, createThread,
+		arg.ID,
+		arg.ChannelID,
+		arg.WorkspaceID,
+		arg.RootMessageID,
+		arg.IssueID,
+		arg.Title,
+		arg.Status,
+		arg.CreatedBy,
+		arg.CreatedByType,
+		arg.Metadata,
+	)
+	var i Thread
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelID,
+		&i.Title,
+		&i.ReplyCount,
+		&i.LastReplyAt,
+		&i.CreatedAt,
+		&i.WorkspaceID,
+		&i.RootMessageID,
+		&i.IssueID,
+		&i.CreatedBy,
+		&i.CreatedByType,
+		&i.Status,
+		&i.Metadata,
+		&i.LastActivityAt,
+	)
+	return i, err
+}
+
 const deleteThread = `-- name: DeleteThread :exec
 DELETE FROM thread WHERE id = $1
 `
@@ -21,7 +90,7 @@ func (q *Queries) DeleteThread(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getThread = `-- name: GetThread :one
-SELECT id, channel_id, title, reply_count, last_reply_at, created_at FROM thread WHERE id = $1
+SELECT id, channel_id, title, reply_count, last_reply_at, created_at, workspace_id, root_message_id, issue_id, created_by, created_by_type, status, metadata, last_activity_at FROM thread WHERE id = $1
 `
 
 func (q *Queries) GetThread(ctx context.Context, id pgtype.UUID) (Thread, error) {
@@ -34,8 +103,58 @@ func (q *Queries) GetThread(ctx context.Context, id pgtype.UUID) (Thread, error)
 		&i.ReplyCount,
 		&i.LastReplyAt,
 		&i.CreatedAt,
+		&i.WorkspaceID,
+		&i.RootMessageID,
+		&i.IssueID,
+		&i.CreatedBy,
+		&i.CreatedByType,
+		&i.Status,
+		&i.Metadata,
+		&i.LastActivityAt,
 	)
 	return i, err
+}
+
+const getThreadByRootMessage = `-- name: GetThreadByRootMessage :one
+SELECT id, channel_id, title, reply_count, last_reply_at, created_at, workspace_id, root_message_id, issue_id, created_by, created_by_type, status, metadata, last_activity_at FROM thread WHERE root_message_id = $1 LIMIT 1
+`
+
+func (q *Queries) GetThreadByRootMessage(ctx context.Context, rootMessageID pgtype.UUID) (Thread, error) {
+	row := q.db.QueryRow(ctx, getThreadByRootMessage, rootMessageID)
+	var i Thread
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelID,
+		&i.Title,
+		&i.ReplyCount,
+		&i.LastReplyAt,
+		&i.CreatedAt,
+		&i.WorkspaceID,
+		&i.RootMessageID,
+		&i.IssueID,
+		&i.CreatedBy,
+		&i.CreatedByType,
+		&i.Status,
+		&i.Metadata,
+		&i.LastActivityAt,
+	)
+	return i, err
+}
+
+const incrementThreadReply = `-- name: IncrementThreadReply :exec
+UPDATE thread
+SET reply_count      = reply_count + 1,
+    last_reply_at    = now(),
+    last_activity_at = now()
+WHERE id = $1
+`
+
+// New-semantics: callers invoke this only for human/agent messages,
+// NOT system messages. System-message handlers call TouchThreadActivity
+// instead. Handler migration lands in Task 4.
+func (q *Queries) IncrementThreadReply(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, incrementThreadReply, id)
+	return err
 }
 
 const incrementThreadReplyCount = `-- name: IncrementThreadReplyCount :exec
@@ -44,26 +163,36 @@ SET reply_count = reply_count + 1, last_reply_at = NOW()
 WHERE id = $1
 `
 
+// Legacy increment kept for the current message handler. New callers should
+// use IncrementThreadReply (member/agent only) and TouchThreadActivity
+// (system messages). Migration to the new contract lands in Task 4.
 func (q *Queries) IncrementThreadReplyCount(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, incrementThreadReplyCount, id)
 	return err
 }
 
 const listThreadsByChannel = `-- name: ListThreadsByChannel :many
-SELECT id, channel_id, title, reply_count, last_reply_at, created_at FROM thread
+SELECT id, channel_id, title, reply_count, last_reply_at, created_at, workspace_id, root_message_id, issue_id, created_by, created_by_type, status, metadata, last_activity_at FROM thread
 WHERE channel_id = $1
-ORDER BY last_reply_at DESC
-LIMIT $2 OFFSET $3
+  AND ($2::text IS NULL OR status = $2::text)
+ORDER BY last_activity_at DESC NULLS LAST, created_at DESC
+LIMIT $4 OFFSET $3
 `
 
 type ListThreadsByChannelParams struct {
-	ChannelID pgtype.UUID `json:"channel_id"`
-	Limit     int32       `json:"limit"`
-	Offset    int32       `json:"offset"`
+	ChannelID   pgtype.UUID `json:"channel_id"`
+	Status      pgtype.Text `json:"status"`
+	OffsetCount int32       `json:"offset_count"`
+	LimitCount  int32       `json:"limit_count"`
 }
 
 func (q *Queries) ListThreadsByChannel(ctx context.Context, arg ListThreadsByChannelParams) ([]Thread, error) {
-	rows, err := q.db.Query(ctx, listThreadsByChannel, arg.ChannelID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listThreadsByChannel,
+		arg.ChannelID,
+		arg.Status,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -78,6 +207,14 @@ func (q *Queries) ListThreadsByChannel(ctx context.Context, arg ListThreadsByCha
 			&i.ReplyCount,
 			&i.LastReplyAt,
 			&i.CreatedAt,
+			&i.WorkspaceID,
+			&i.RootMessageID,
+			&i.IssueID,
+			&i.CreatedBy,
+			&i.CreatedByType,
+			&i.Status,
+			&i.Metadata,
+			&i.LastActivityAt,
 		); err != nil {
 			return nil, err
 		}
@@ -89,23 +226,191 @@ func (q *Queries) ListThreadsByChannel(ctx context.Context, arg ListThreadsByCha
 	return items, nil
 }
 
+const listThreadsByIssue = `-- name: ListThreadsByIssue :many
+SELECT id, channel_id, title, reply_count, last_reply_at, created_at, workspace_id, root_message_id, issue_id, created_by, created_by_type, status, metadata, last_activity_at FROM thread
+WHERE issue_id = $1
+  AND ($2::text IS NULL OR status = $2::text)
+ORDER BY created_at DESC
+`
+
+type ListThreadsByIssueParams struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	Status  pgtype.Text `json:"status"`
+}
+
+func (q *Queries) ListThreadsByIssue(ctx context.Context, arg ListThreadsByIssueParams) ([]Thread, error) {
+	rows, err := q.db.Query(ctx, listThreadsByIssue, arg.IssueID, arg.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Thread{}
+	for rows.Next() {
+		var i Thread
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelID,
+			&i.Title,
+			&i.ReplyCount,
+			&i.LastReplyAt,
+			&i.CreatedAt,
+			&i.WorkspaceID,
+			&i.RootMessageID,
+			&i.IssueID,
+			&i.CreatedBy,
+			&i.CreatedByType,
+			&i.Status,
+			&i.Metadata,
+			&i.LastActivityAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listThreadsByWorkspace = `-- name: ListThreadsByWorkspace :many
+SELECT id, channel_id, title, reply_count, last_reply_at, created_at, workspace_id, root_message_id, issue_id, created_by, created_by_type, status, metadata, last_activity_at FROM thread
+WHERE workspace_id = $1
+  AND ($2::text IS NULL OR status = $2::text)
+ORDER BY last_activity_at DESC NULLS LAST, created_at DESC
+LIMIT $4 OFFSET $3
+`
+
+type ListThreadsByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Status      pgtype.Text `json:"status"`
+	OffsetCount int32       `json:"offset_count"`
+	LimitCount  int32       `json:"limit_count"`
+}
+
+func (q *Queries) ListThreadsByWorkspace(ctx context.Context, arg ListThreadsByWorkspaceParams) ([]Thread, error) {
+	rows, err := q.db.Query(ctx, listThreadsByWorkspace,
+		arg.WorkspaceID,
+		arg.Status,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Thread{}
+	for rows.Next() {
+		var i Thread
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelID,
+			&i.Title,
+			&i.ReplyCount,
+			&i.LastReplyAt,
+			&i.CreatedAt,
+			&i.WorkspaceID,
+			&i.RootMessageID,
+			&i.IssueID,
+			&i.CreatedBy,
+			&i.CreatedByType,
+			&i.Status,
+			&i.Metadata,
+			&i.LastActivityAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const touchThreadActivity = `-- name: TouchThreadActivity :exec
+UPDATE thread
+SET last_activity_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) TouchThreadActivity(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, touchThreadActivity, id)
+	return err
+}
+
+const updateThreadMetadata = `-- name: UpdateThreadMetadata :exec
+UPDATE thread
+SET metadata = $2
+WHERE id = $1
+`
+
+type UpdateThreadMetadataParams struct {
+	ID       pgtype.UUID `json:"id"`
+	Metadata []byte      `json:"metadata"`
+}
+
+func (q *Queries) UpdateThreadMetadata(ctx context.Context, arg UpdateThreadMetadataParams) error {
+	_, err := q.db.Exec(ctx, updateThreadMetadata, arg.ID, arg.Metadata)
+	return err
+}
+
+const updateThreadStatus = `-- name: UpdateThreadStatus :exec
+UPDATE thread
+SET status = $2
+WHERE id = $1
+`
+
+type UpdateThreadStatusParams struct {
+	ID     pgtype.UUID `json:"id"`
+	Status string      `json:"status"`
+}
+
+func (q *Queries) UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatusParams) error {
+	_, err := q.db.Exec(ctx, updateThreadStatus, arg.ID, arg.Status)
+	return err
+}
+
+const updateThreadTitle = `-- name: UpdateThreadTitle :exec
+UPDATE thread
+SET title = $2
+WHERE id = $1
+`
+
+type UpdateThreadTitleParams struct {
+	ID    pgtype.UUID `json:"id"`
+	Title pgtype.Text `json:"title"`
+}
+
+func (q *Queries) UpdateThreadTitle(ctx context.Context, arg UpdateThreadTitleParams) error {
+	_, err := q.db.Exec(ctx, updateThreadTitle, arg.ID, arg.Title)
+	return err
+}
+
 const upsertThread = `-- name: UpsertThread :one
-INSERT INTO thread (id, channel_id, title, reply_count, last_reply_at, created_at)
-VALUES ($1, $2, $3, 1, NOW(), NOW())
+INSERT INTO thread (id, channel_id, workspace_id, title, reply_count, last_reply_at, last_activity_at, created_at)
+VALUES ($1, $2, $3, $4, 1, NOW(), NOW(), NOW())
 ON CONFLICT (id) DO UPDATE SET
-    reply_count = thread.reply_count + 1,
-    last_reply_at = NOW()
-RETURNING id, channel_id, title, reply_count, last_reply_at, created_at
+    reply_count       = thread.reply_count + 1,
+    last_reply_at     = NOW(),
+    last_activity_at  = NOW()
+RETURNING id, channel_id, title, reply_count, last_reply_at, created_at, workspace_id, root_message_id, issue_id, created_by, created_by_type, status, metadata, last_activity_at
 `
 
 type UpsertThreadParams struct {
-	ID        pgtype.UUID `json:"id"`
-	ChannelID pgtype.UUID `json:"channel_id"`
-	Title     pgtype.Text `json:"title"`
+	ID          pgtype.UUID `json:"id"`
+	ChannelID   pgtype.UUID `json:"channel_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Title       pgtype.Text `json:"title"`
 }
 
 func (q *Queries) UpsertThread(ctx context.Context, arg UpsertThreadParams) (Thread, error) {
-	row := q.db.QueryRow(ctx, upsertThread, arg.ID, arg.ChannelID, arg.Title)
+	row := q.db.QueryRow(ctx, upsertThread,
+		arg.ID,
+		arg.ChannelID,
+		arg.WorkspaceID,
+		arg.Title,
+	)
 	var i Thread
 	err := row.Scan(
 		&i.ID,
@@ -114,6 +419,14 @@ func (q *Queries) UpsertThread(ctx context.Context, arg UpsertThreadParams) (Thr
 		&i.ReplyCount,
 		&i.LastReplyAt,
 		&i.CreatedAt,
+		&i.WorkspaceID,
+		&i.RootMessageID,
+		&i.IssueID,
+		&i.CreatedBy,
+		&i.CreatedByType,
+		&i.Status,
+		&i.Metadata,
+		&i.LastActivityAt,
 	)
 	return i, err
 }

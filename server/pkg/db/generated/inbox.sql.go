@@ -69,7 +69,7 @@ func (q *Queries) ArchiveCompletedInbox(ctx context.Context, arg ArchiveComplete
 const archiveInboxItem = `-- name: ArchiveInboxItem :one
 UPDATE inbox_item SET archived = true
 WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, action_required, action_type, deadline, resolution_status, related_project_id, related_run_id, related_conversation_id
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, action_required, action_type, deadline, resolution_status, related_project_id, related_run_id, related_conversation_id, plan_id, task_id, slot_id, thread_id, channel_id, resolved_at, resolution, resolution_by
 `
 
 func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
@@ -98,6 +98,14 @@ func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxIt
 		&i.RelatedProjectID,
 		&i.RelatedRunID,
 		&i.RelatedConversationID,
+		&i.PlanID,
+		&i.TaskID,
+		&i.SlotID,
+		&i.ThreadID,
+		&i.ChannelID,
+		&i.ResolvedAt,
+		&i.Resolution,
+		&i.ResolutionBy,
 	)
 	return i, err
 }
@@ -123,7 +131,7 @@ func (q *Queries) CountUnreadInbox(ctx context.Context, arg CountUnreadInboxPara
 const createEscalationInboxItem = `-- name: CreateEscalationInboxItem :one
 INSERT INTO inbox_item (workspace_id, recipient_id, recipient_type, type, severity, title, body, action_required, action_type, deadline, related_project_id, related_run_id, actor_type, actor_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, action_required, action_type, deadline, resolution_status, related_project_id, related_run_id, related_conversation_id
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, action_required, action_type, deadline, resolution_status, related_project_id, related_run_id, related_conversation_id, plan_id, task_id, slot_id, thread_id, channel_id, resolved_at, resolution, resolution_by
 `
 
 type CreateEscalationInboxItemParams struct {
@@ -184,6 +192,14 @@ func (q *Queries) CreateEscalationInboxItem(ctx context.Context, arg CreateEscal
 		&i.RelatedProjectID,
 		&i.RelatedRunID,
 		&i.RelatedConversationID,
+		&i.PlanID,
+		&i.TaskID,
+		&i.SlotID,
+		&i.ThreadID,
+		&i.ChannelID,
+		&i.ResolvedAt,
+		&i.Resolution,
+		&i.ResolutionBy,
 	)
 	return i, err
 }
@@ -194,7 +210,7 @@ INSERT INTO inbox_item (
     type, severity, issue_id, title, body,
     actor_type, actor_id, details
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, action_required, action_type, deadline, resolution_status, related_project_id, related_run_id, related_conversation_id
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, action_required, action_type, deadline, resolution_status, related_project_id, related_run_id, related_conversation_id, plan_id, task_id, slot_id, thread_id, channel_id, resolved_at, resolution, resolution_by
 `
 
 type CreateInboxItemParams struct {
@@ -249,12 +265,20 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 		&i.RelatedProjectID,
 		&i.RelatedRunID,
 		&i.RelatedConversationID,
+		&i.PlanID,
+		&i.TaskID,
+		&i.SlotID,
+		&i.ThreadID,
+		&i.ChannelID,
+		&i.ResolvedAt,
+		&i.Resolution,
+		&i.ResolutionBy,
 	)
 	return i, err
 }
 
 const getInboxItem = `-- name: GetInboxItem :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, action_required, action_type, deadline, resolution_status, related_project_id, related_run_id, related_conversation_id FROM inbox_item
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, action_required, action_type, deadline, resolution_status, related_project_id, related_run_id, related_conversation_id, plan_id, task_id, slot_id, thread_id, channel_id, resolved_at, resolution, resolution_by FROM inbox_item
 WHERE id = $1
 `
 
@@ -284,12 +308,20 @@ func (q *Queries) GetInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, 
 		&i.RelatedProjectID,
 		&i.RelatedRunID,
 		&i.RelatedConversationID,
+		&i.PlanID,
+		&i.TaskID,
+		&i.SlotID,
+		&i.ThreadID,
+		&i.ChannelID,
+		&i.ResolvedAt,
+		&i.Resolution,
+		&i.ResolutionBy,
 	)
 	return i, err
 }
 
 const getInboxItemInWorkspace = `-- name: GetInboxItemInWorkspace :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, action_required, action_type, deadline, resolution_status, related_project_id, related_run_id, related_conversation_id FROM inbox_item
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, action_required, action_type, deadline, resolution_status, related_project_id, related_run_id, related_conversation_id, plan_id, task_id, slot_id, thread_id, channel_id, resolved_at, resolution, resolution_by FROM inbox_item
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -324,12 +356,20 @@ func (q *Queries) GetInboxItemInWorkspace(ctx context.Context, arg GetInboxItemI
 		&i.RelatedProjectID,
 		&i.RelatedRunID,
 		&i.RelatedConversationID,
+		&i.PlanID,
+		&i.TaskID,
+		&i.SlotID,
+		&i.ThreadID,
+		&i.ChannelID,
+		&i.ResolvedAt,
+		&i.Resolution,
+		&i.ResolutionBy,
 	)
 	return i, err
 }
 
 const listInboxItems = `-- name: ListInboxItems :many
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.action_required, i.action_type, i.deadline, i.resolution_status, i.related_project_id, i.related_run_id, i.related_conversation_id,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.action_required, i.action_type, i.deadline, i.resolution_status, i.related_project_id, i.related_run_id, i.related_conversation_id, i.plan_id, i.task_id, i.slot_id, i.thread_id, i.channel_id, i.resolved_at, i.resolution, i.resolution_by,
        iss.status as issue_status
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
@@ -366,6 +406,14 @@ type ListInboxItemsRow struct {
 	RelatedProjectID      pgtype.UUID        `json:"related_project_id"`
 	RelatedRunID          pgtype.UUID        `json:"related_run_id"`
 	RelatedConversationID pgtype.UUID        `json:"related_conversation_id"`
+	PlanID                pgtype.UUID        `json:"plan_id"`
+	TaskID                pgtype.UUID        `json:"task_id"`
+	SlotID                pgtype.UUID        `json:"slot_id"`
+	ThreadID              pgtype.UUID        `json:"thread_id"`
+	ChannelID             pgtype.UUID        `json:"channel_id"`
+	ResolvedAt            pgtype.Timestamptz `json:"resolved_at"`
+	Resolution            pgtype.Text        `json:"resolution"`
+	ResolutionBy          pgtype.UUID        `json:"resolution_by"`
 	IssueStatus           pgtype.Text        `json:"issue_status"`
 }
 
@@ -401,6 +449,14 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 			&i.RelatedProjectID,
 			&i.RelatedRunID,
 			&i.RelatedConversationID,
+			&i.PlanID,
+			&i.TaskID,
+			&i.SlotID,
+			&i.ThreadID,
+			&i.ChannelID,
+			&i.ResolvedAt,
+			&i.Resolution,
+			&i.ResolutionBy,
 			&i.IssueStatus,
 		); err != nil {
 			return nil, err
@@ -411,6 +467,89 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const listInboxUnresolved = `-- name: ListInboxUnresolved :many
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, action_required, action_type, deadline, resolution_status, related_project_id, related_run_id, related_conversation_id, plan_id, task_id, slot_id, thread_id, channel_id, resolved_at, resolution, resolution_by FROM inbox_item
+WHERE recipient_id = $1
+  AND resolved_at IS NULL
+ORDER BY created_at DESC
+LIMIT $3 OFFSET $2
+`
+
+type ListInboxUnresolvedParams struct {
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	OffsetCount int32       `json:"offset_count"`
+	LimitCount  int32       `json:"limit_count"`
+}
+
+// Plan 4 §8: paginated list of unresolved inbox items for a recipient.
+// Uses idx_inbox_item_recipient_active partial index.
+func (q *Queries) ListInboxUnresolved(ctx context.Context, arg ListInboxUnresolvedParams) ([]InboxItem, error) {
+	rows, err := q.db.Query(ctx, listInboxUnresolved, arg.RecipientID, arg.OffsetCount, arg.LimitCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []InboxItem{}
+	for rows.Next() {
+		var i InboxItem
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.RecipientType,
+			&i.RecipientID,
+			&i.Type,
+			&i.Severity,
+			&i.IssueID,
+			&i.Title,
+			&i.Body,
+			&i.Read,
+			&i.Archived,
+			&i.CreatedAt,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Details,
+			&i.ActionRequired,
+			&i.ActionType,
+			&i.Deadline,
+			&i.ResolutionStatus,
+			&i.RelatedProjectID,
+			&i.RelatedRunID,
+			&i.RelatedConversationID,
+			&i.PlanID,
+			&i.TaskID,
+			&i.SlotID,
+			&i.ThreadID,
+			&i.ChannelID,
+			&i.ResolvedAt,
+			&i.Resolution,
+			&i.ResolutionBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markAllInboxItemsRead = `-- name: MarkAllInboxItemsRead :execrows
+UPDATE inbox_item
+SET read = true
+WHERE recipient_id = $1
+  AND read = false
+`
+
+// Plan 4 §8: mark all unread items as read for a recipient (workspace-agnostic).
+func (q *Queries) MarkAllInboxItemsRead(ctx context.Context, recipientID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, markAllInboxItemsRead, recipientID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const markAllInboxRead = `-- name: MarkAllInboxRead :execrows
@@ -431,10 +570,30 @@ func (q *Queries) MarkAllInboxRead(ctx context.Context, arg MarkAllInboxReadPara
 	return result.RowsAffected(), nil
 }
 
+const markInboxItemRead = `-- name: MarkInboxItemRead :exec
+UPDATE inbox_item
+SET read = true
+WHERE id = $1
+  AND recipient_id = $2
+  AND read = false
+`
+
+type MarkInboxItemReadParams struct {
+	ID          pgtype.UUID `json:"id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+}
+
+// Plan 4 §8: mark a single inbox item as read for a specific recipient.
+// Idempotent: no-op when the row is already read.
+func (q *Queries) MarkInboxItemRead(ctx context.Context, arg MarkInboxItemReadParams) error {
+	_, err := q.db.Exec(ctx, markInboxItemRead, arg.ID, arg.RecipientID)
+	return err
+}
+
 const markInboxRead = `-- name: MarkInboxRead :one
 UPDATE inbox_item SET read = true
 WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, action_required, action_type, deadline, resolution_status, related_project_id, related_run_id, related_conversation_id
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, action_required, action_type, deadline, resolution_status, related_project_id, related_run_id, related_conversation_id, plan_id, task_id, slot_id, thread_id, channel_id, resolved_at, resolution, resolution_by
 `
 
 func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
@@ -463,6 +622,42 @@ func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem,
 		&i.RelatedProjectID,
 		&i.RelatedRunID,
 		&i.RelatedConversationID,
+		&i.PlanID,
+		&i.TaskID,
+		&i.SlotID,
+		&i.ThreadID,
+		&i.ChannelID,
+		&i.ResolvedAt,
+		&i.Resolution,
+		&i.ResolutionBy,
 	)
 	return i, err
+}
+
+const resolveInboxItem = `-- name: ResolveInboxItem :exec
+UPDATE inbox_item
+SET resolved_at   = now(),
+    resolution    = $1,
+    resolution_by = $2
+WHERE id = $3
+  AND recipient_id = $4
+`
+
+type ResolveInboxItemParams struct {
+	Resolution   pgtype.Text `json:"resolution"`
+	ResolutionBy pgtype.UUID `json:"resolution_by"`
+	ID           pgtype.UUID `json:"id"`
+	RecipientID  pgtype.UUID `json:"recipient_id"`
+}
+
+// Plan 4 §8: mark an inbox item as resolved with a resolution and operator.
+// Recipient ownership check enforced in WHERE clause.
+func (q *Queries) ResolveInboxItem(ctx context.Context, arg ResolveInboxItemParams) error {
+	_, err := q.db.Exec(ctx, resolveInboxItem,
+		arg.Resolution,
+		arg.ResolutionBy,
+		arg.ID,
+		arg.RecipientID,
+	)
+	return err
 }

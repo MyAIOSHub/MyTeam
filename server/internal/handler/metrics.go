@@ -4,8 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // ---------------------------------------------------------------------------
@@ -75,101 +73,35 @@ func (h *Handler) GetWorkspaceMetrics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, metrics)
 }
 
-// queryTaskCompletionRate computes completed / (completed + failed + cancelled)
-// from the workflow_step table.
+// queryTaskCompletionRate previously read completed/failed/cancelled counts
+// from the workflow_step table. Migration 059 dropped that table.
+//
+// TODO(plan5): replace with task/execution metrics in Batch D once the
+// new Task and Execution surfaces are in place.
 func (h *Handler) queryTaskCompletionRate(ctx context.Context, workspaceID string) *float64 {
-	if h.DB == nil {
-		return nil
-	}
-
-	query := `
-		SELECT
-			COUNT(*) FILTER (WHERE ws.status = 'completed') AS completed,
-			COUNT(*) FILTER (WHERE ws.status IN ('completed', 'failed', 'cancelled')) AS total
-		FROM workflow_step ws
-		JOIN workflow w ON w.id = ws.workflow_id
-		WHERE w.workspace_id = $1
-		  AND ws.status IN ('completed', 'failed', 'cancelled')
-	`
-
-	var completed, total int64
-	err := h.DB.QueryRow(ctx, query, workspaceID).Scan(&completed, &total)
-	if err != nil {
-		if err != pgx.ErrNoRows {
-			slog.Debug("metrics: failed to query task completion rate", "error", err)
-		}
-		return nil
-	}
-
-	if total == 0 {
-		return nil
-	}
-
-	rate := float64(completed) / float64(total)
-	return &rate
+	_ = ctx
+	_ = workspaceID
+	return nil
 }
 
-// queryAverageTaskDuration computes avg(completed_at - started_at) in seconds
-// for completed workflow steps.
+// queryAverageTaskDuration previously averaged completed_at - started_at
+// over workflow_step rows. Migration 059 dropped that table.
+//
+// TODO(plan5): replace with task/execution metrics in Batch D.
 func (h *Handler) queryAverageTaskDuration(ctx context.Context, workspaceID string) *float64 {
-	if h.DB == nil {
-		return nil
-	}
-
-	query := `
-		SELECT EXTRACT(EPOCH FROM AVG(ws.completed_at - ws.started_at))
-		FROM workflow_step ws
-		JOIN workflow w ON w.id = ws.workflow_id
-		WHERE w.workspace_id = $1
-		  AND ws.status = 'completed'
-		  AND ws.started_at IS NOT NULL
-		  AND ws.completed_at IS NOT NULL
-	`
-
-	var avg *float64
-	err := h.DB.QueryRow(ctx, query, workspaceID).Scan(&avg)
-	if err != nil {
-		if err != pgx.ErrNoRows {
-			slog.Debug("metrics: failed to query average task duration", "error", err)
-		}
-		return nil
-	}
-
-	return avg
+	_ = ctx
+	_ = workspaceID
+	return nil
 }
 
-// queryTimeoutRate computes timed_out / total_dispatched from workflow steps.
-// A step is considered "timed out" if it ever entered the 'timeout' status.
+// queryTimeoutRate previously divided timed_out by total dispatched workflow
+// steps. Migration 059 dropped that table.
+//
+// TODO(plan5): replace with task/execution metrics in Batch D.
 func (h *Handler) queryTimeoutRate(ctx context.Context, workspaceID string) *float64 {
-	if h.DB == nil {
-		return nil
-	}
-
-	query := `
-		SELECT
-			COUNT(*) FILTER (WHERE ws.status = 'timeout') AS timed_out,
-			COUNT(*) AS total_dispatched
-		FROM workflow_step ws
-		JOIN workflow w ON w.id = ws.workflow_id
-		WHERE w.workspace_id = $1
-		  AND ws.status IN ('running', 'completed', 'failed', 'cancelled', 'timeout')
-	`
-
-	var timedOut, total int64
-	err := h.DB.QueryRow(ctx, query, workspaceID).Scan(&timedOut, &total)
-	if err != nil {
-		if err != pgx.ErrNoRows {
-			slog.Debug("metrics: failed to query timeout rate", "error", err)
-		}
-		return nil
-	}
-
-	if total == 0 {
-		return nil
-	}
-
-	rate := float64(timedOut) / float64(total)
-	return &rate
+	_ = ctx
+	_ = workspaceID
+	return nil
 }
 
 // queryPendingEscalations counts inbox items with action_required = true

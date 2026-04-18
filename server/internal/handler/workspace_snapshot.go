@@ -268,7 +268,6 @@ func (h *Handler) listDMConversations(ctx context.Context, workspaceID, userID s
 			FROM message
 			WHERE workspace_id = $1::uuid
 				AND channel_id IS NULL
-				AND session_id IS NULL
 				AND (
 					(sender_id = $2::uuid AND sender_type = 'member')
 					OR (recipient_id = $2::uuid AND recipient_type = 'member')

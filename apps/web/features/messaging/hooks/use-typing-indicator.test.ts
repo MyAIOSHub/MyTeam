@@ -91,30 +91,6 @@ describe("useTypingIndicator", () => {
     expect(result.current.typingUsers).toEqual([]);
   });
 
-  it("filters events by session_id", () => {
-    const { result } = renderHook(() => useTypingIndicator({ sessionId: "sess-1" }));
-
-    act(() => {
-      wsHandler!({
-        session_id: "sess-other",
-        sender_id: "user-2",
-        is_typing: true,
-      });
-    });
-
-    expect(result.current.typingUsers).toEqual([]);
-
-    act(() => {
-      wsHandler!({
-        session_id: "sess-1",
-        sender_id: "user-2",
-        is_typing: true,
-      });
-    });
-
-    expect(result.current.typingUsers).toEqual(["user-2"]);
-  });
-
   it("removes typing user when is_typing is false", () => {
     const { result } = renderHook(() => useTypingIndicator({ channelId: "ch-1" }));
 
@@ -180,7 +156,6 @@ describe("useTypingIndicator", () => {
     expect(sendTypingMock).toHaveBeenCalledTimes(1);
     expect(sendTypingMock).toHaveBeenCalledWith({
       channel_id: "ch-1",
-      session_id: undefined,
       is_typing: true,
     });
 
@@ -220,7 +195,6 @@ describe("useTypingIndicator", () => {
     expect(sendTypingMock).toHaveBeenCalledTimes(2);
     expect(sendTypingMock).toHaveBeenLastCalledWith({
       channel_id: "ch-1",
-      session_id: undefined,
       is_typing: false,
     });
   });

@@ -7,17 +7,18 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// GET /api/listen?agent_id=X&channel_id=X&session_id=X&after_id=X&timeout=30
+// GET /api/listen?agent_id=X&channel_id=X&after_id=X&timeout=30
 // Long-polls for new messages, returns when a message arrives or timeout.
+// session_id was removed in Plan 3 Phase 6; callers should use channel_id
+// (optionally combined with thread_id filtering via ListChannelMessages).
 func (h *Handler) Listen(w http.ResponseWriter, r *http.Request) {
 	agentID := r.URL.Query().Get("agent_id")
 	channelID := r.URL.Query().Get("channel_id")
-	sessionID := r.URL.Query().Get("session_id")
 	afterID := r.URL.Query().Get("after_id")
 	timeoutSec := queryInt(r, "timeout", 30)
 
-	if agentID == "" && channelID == "" && sessionID == "" {
-		writeError(w, http.StatusBadRequest, "specify agent_id, channel_id, or session_id")
+	if agentID == "" && channelID == "" {
+		writeError(w, http.StatusBadRequest, "specify agent_id or channel_id")
 		return
 	}
 
@@ -34,20 +35,6 @@ func (h *Handler) Listen(w http.ResponseWriter, r *http.Request) {
 		if channelID != "" {
 			msgs, err := h.Queries.ListChannelMessages(r.Context(), db.ListChannelMessagesParams{
 				ChannelID: parseUUID(channelID),
-				Limit:     10,
-				Offset:    0,
-			})
-			if err == nil {
-				for _, m := range msgs {
-					if afterID != "" && uuidToString(m.ID) <= afterID {
-						continue
-					}
-					messages = append(messages, messageToResponse(m))
-				}
-			}
-		} else if sessionID != "" {
-			msgs, err := h.Queries.ListSessionMessages(r.Context(), db.ListSessionMessagesParams{
-				SessionID: parseUUID(sessionID),
 				Limit:     10,
 				Offset:    0,
 			})

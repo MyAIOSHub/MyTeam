@@ -171,6 +171,79 @@ export class MyTeamClient {
     return this.fetch(`/api/sessions/${id}/summary`);
   }
 
+  // ─── Threads ───────────────────────────────────
+
+  async createThread(body: {
+    channel_id: string;
+    title?: string;
+    root_message_id?: string;
+    issue_id?: string;
+  }): Promise<any> {
+    return this.fetch(`/api/channels/${body.channel_id}/threads`, {
+      method: "POST",
+      body: JSON.stringify({
+        title: body.title,
+        root_message_id: body.root_message_id,
+        issue_id: body.issue_id,
+      }),
+    });
+  }
+
+  async getThread(threadId: string): Promise<any> {
+    return this.fetch(`/api/threads/${threadId}`);
+  }
+
+  async listThreadMessages(
+    threadId: string,
+    params?: { limit?: number; offset?: number },
+  ): Promise<{ messages: any[] }> {
+    const qs = new URLSearchParams();
+    if (params?.limit != null) qs.set("limit", String(params.limit));
+    if (params?.offset != null) qs.set("offset", String(params.offset));
+    const q = qs.toString();
+    return this.fetch(`/api/threads/${threadId}/messages${q ? "?" + q : ""}`);
+  }
+
+  async postThreadMessage(
+    threadId: string,
+    body: { content: string },
+  ): Promise<any> {
+    return this.fetch(`/api/threads/${threadId}/messages`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async listThreadContextItems(threadId: string): Promise<any> {
+    return this.fetch(`/api/threads/${threadId}/context-items`);
+  }
+
+  async createThreadContextItem(
+    threadId: string,
+    body: {
+      item_type: "decision" | "file" | "code_snippet" | "summary" | "reference";
+      title?: string;
+      body?: string;
+      metadata?: Record<string, unknown>;
+      retention_class?: "permanent" | "ttl" | "temp";
+    },
+  ): Promise<any> {
+    return this.fetch(`/api/threads/${threadId}/context-items`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteThreadContextItem(
+    threadId: string,
+    itemId: string,
+  ): Promise<void> {
+    await this.fetch<void>(
+      `/api/threads/${threadId}/context-items/${itemId}`,
+      { method: "DELETE" },
+    );
+  }
+
   // ─── Issues (MyTeam native) ───────────────────
 
   async listIssues(

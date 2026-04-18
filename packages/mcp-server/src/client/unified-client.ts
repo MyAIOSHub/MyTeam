@@ -136,6 +136,60 @@ export class UnifiedClient {
     return this.hub!.getSessionSummary(id);
   }
 
+  // ─── Threads ─────────────
+  // Routes to Multica when configured, otherwise falls back to Hub. Both
+  // backends expose equivalent thread endpoints.
+  async createThread(data: { channel_id: string; title?: string; root_message_id?: string; issue_id?: string }): Promise<any> {
+    if (this.multica) return this.multica.createThread(data);
+    if (this.hub) return this.hub.createThread(data);
+    throw new Error("Threads not available — no client configured");
+  }
+
+  async getThread(id: string): Promise<any> {
+    if (this.multica) return this.multica.getThread(id);
+    if (this.hub) return this.hub.getThread(id);
+    throw new Error("Threads not available — no client configured");
+  }
+
+  async listThreadMessages(id: string, params?: { limit?: number; offset?: number }): Promise<any> {
+    if (this.multica) return this.multica.listThreadMessages(id, params);
+    if (this.hub) return this.hub.listThreadMessages(id, params);
+    throw new Error("Threads not available — no client configured");
+  }
+
+  async postThreadMessage(id: string, body: { content: string }): Promise<any> {
+    if (this.multica) return this.multica.postThreadMessage(id, body);
+    if (this.hub) return this.hub.postThreadMessage(id, body);
+    throw new Error("Threads not available — no client configured");
+  }
+
+  async listThreadContextItems(id: string): Promise<any> {
+    if (this.multica) return this.multica.listThreadContextItems(id);
+    if (this.hub) return this.hub.listThreadContextItems(id);
+    throw new Error("Threads not available — no client configured");
+  }
+
+  async createThreadContextItem(
+    id: string,
+    data: {
+      item_type: "decision" | "file" | "code_snippet" | "summary" | "reference";
+      title?: string;
+      body?: string;
+      metadata?: Record<string, unknown>;
+      retention_class?: "permanent" | "ttl" | "temp";
+    },
+  ): Promise<any> {
+    if (this.multica) return this.multica.createThreadContextItem(id, data);
+    if (this.hub) return this.hub.createThreadContextItem(id, data);
+    throw new Error("Threads not available — no client configured");
+  }
+
+  async deleteThreadContextItem(id: string, itemId: string): Promise<void> {
+    if (this.multica) return this.multica.deleteThreadContextItem(id, itemId);
+    if (this.hub) return this.hub.deleteThreadContextItem(id, itemId);
+    throw new Error("Threads not available — no client configured");
+  }
+
   // ─── Issues (Multica only) ─────────────
   async listIssues(params?: Record<string, string>): Promise<{ issues: any[] }> {
     if (this.multica) return this.multica.listIssues(params);

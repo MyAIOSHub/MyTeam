@@ -23,7 +23,6 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		ChannelID       *string         `json:"channel_id,omitempty"`
 		RecipientID     *string         `json:"recipient_id,omitempty"`
 		RecipientType   *string         `json:"recipient_type,omitempty"`
-		SessionID       *string         `json:"session_id,omitempty"`
 		Content         string          `json:"content"`
 		ContentType     string          `json:"content_type,omitempty"`
 		FileID          *string         `json:"file_id,omitempty"`
@@ -88,6 +87,8 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		threadID = h.resolveOrCreateThread(r.Context(), *req.ParentMessageID)
 	}
 
+	channelUUID := ptrToUUID(req.ChannelID)
+
 	// Use parent_message_id as ParentID if the legacy ParentID is not set.
 	parentID := ptrToUUID(req.ParentID)
 	if !parentID.Valid && req.ParentMessageID != nil {
@@ -98,10 +99,9 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID:     parseUUID(workspaceID),
 		SenderID:        parseUUID(senderID),
 		SenderType:      senderType,
-		ChannelID:       ptrToUUID(req.ChannelID),
+		ChannelID:       channelUUID,
 		RecipientID:     ptrToUUID(req.RecipientID),
 		RecipientType:   ptrToText(req.RecipientType),
-		SessionID:       ptrToUUID(req.SessionID),
 		Content:         req.Content,
 		ContentType:     contentType,
 		FileID:          ptrToUUID(req.FileID),
@@ -111,9 +111,7 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		Metadata:        req.Metadata,
 		ParentID:        parentID,
 		Type:            msgType,
-		// TODO: wire after sqlc generation — add these fields to CreateMessageParams:
-		// IsImpersonated: isImpersonated,
-		// ThreadID:       threadID,
+		ThreadID:        threadID,
 	})
 	if err != nil {
 		slog.Warn("create message failed", "error", err)
@@ -121,10 +119,10 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If we created/resolved a thread, increment its reply count.
-	if threadID.Valid {
-		h.incrementThreadReplyCount(r.Context(), threadID)
-	}
+	// If the message lives in a thread (via parent_message_id), bump
+	// counters using the PRD §4 semantics (member/agent -> reply_count +
+	// last_reply_at; system -> last_activity_at only).
+	h.incrementThreadCounters(r.Context(), threadID, senderType)
 
 	// Dedup check for WS broadcast
 	actorType := senderType
@@ -154,16 +152,14 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Check for @mentions and trigger auto-reply
-	if h.AutoReplyService != nil {
-		mentions := ParseMentions(req.Content)
-		if len(mentions) > 0 {
-			h.AutoReplyService.CheckAndReply(r.Context(), mentions, workspaceID,
-				uuidToString(msg.ChannelID), msg)
-		}
-	}
-
-	// DM to agent: trigger auto-reply for direct messages sent to an agent.
+	// Channel @mention auto-reply is no longer triggered here. MediationService
+	// is the single gate for channel/thread routing — it subscribes to the
+	// "message:created" event published above and decides whether to dispatch
+	// AutoReplyService based on the unified routing priority + anti-loop rules
+	// (Plan 3 Task 6).
+	//
+	// Direct messages to an agent (no channel/thread context) still trigger
+	// AutoReply directly because they bypass routing entirely.
 	if h.AutoReplyService != nil && req.RecipientType != nil && *req.RecipientType == "agent" && req.RecipientID != nil && *req.RecipientID != "" {
 		go h.AutoReplyService.ReplyToDM(context.Background(), *req.RecipientID, workspaceID, senderID, msg)
 	}
@@ -172,18 +168,19 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 // resolveOrCreateThread looks up or creates a thread for a parent message.
-// Thread ID equals the root message ID per the data model.
+// Thread ID equals the root message ID per the data model. Returns an invalid
+// pgtype.UUID on failure (caller treats that as "no thread context").
 func (h *Handler) resolveOrCreateThread(ctx context.Context, parentMessageID string) pgtype.UUID {
 	parentUUID := parseUUID(parentMessageID)
 
 	// Check if thread already exists for this parent message.
-	_, err := h.getThread(ctx, parentMessageID)
-	if err == nil {
+	if _, err := h.getThread(ctx, parentMessageID); err == nil {
 		// Thread exists.
 		return parentUUID
 	}
 
-	// Thread does not exist — look up the parent message to get its channel_id.
+	// Thread does not exist — look up the parent message to get its
+	// channel_id + workspace_id (both required by thread NOT NULL columns).
 	parentMsg, err := h.Queries.GetMessage(ctx, parentUUID)
 	if err != nil {
 		slog.Warn("resolve thread: parent message not found", "parent_message_id", parentMessageID, "error", err)
@@ -191,7 +188,7 @@ func (h *Handler) resolveOrCreateThread(ctx context.Context, parentMessageID str
 	}
 
 	// Create a new thread with id = parent_message_id.
-	if err := h.upsertThread(ctx, parentUUID, parentMsg.ChannelID); err != nil {
+	if err := h.upsertThread(ctx, parentUUID, parentMsg.ChannelID, parentMsg.WorkspaceID); err != nil {
 		slog.Warn("resolve thread: failed to create thread", "parent_message_id", parentMessageID, "error", err)
 		return pgtype.UUID{}
 	}
@@ -199,12 +196,11 @@ func (h *Handler) resolveOrCreateThread(ctx context.Context, parentMessageID str
 	return parentUUID
 }
 
-// GET /api/messages?channel_id=X or recipient_id=X or session_id=X
+// GET /api/messages?channel_id=X or recipient_id=X
 func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	workspaceID := resolveWorkspaceID(r)
 	channelID := r.URL.Query().Get("channel_id")
 	recipientID := r.URL.Query().Get("recipient_id")
-	sessionID := r.URL.Query().Get("session_id")
 	limit := queryInt(r, "limit", 50)
 	offset := queryInt(r, "offset", 0)
 
@@ -214,12 +210,6 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	if channelID != "" {
 		messages, err = h.Queries.ListChannelMessages(r.Context(), db.ListChannelMessagesParams{
 			ChannelID: parseUUID(channelID),
-			Limit:     int32(limit),
-			Offset:    int32(offset),
-		})
-	} else if sessionID != "" {
-		messages, err = h.Queries.ListSessionMessages(r.Context(), db.ListSessionMessagesParams{
-			SessionID: parseUUID(sessionID),
 			Limit:     int32(limit),
 			Offset:    int32(offset),
 		})
@@ -238,7 +228,7 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 			Offset:        int32(offset),
 		})
 	} else {
-		writeError(w, http.StatusBadRequest, "specify channel_id, recipient_id, or session_id")
+		writeError(w, http.StatusBadRequest, "specify channel_id or recipient_id")
 		return
 	}
 
@@ -423,7 +413,6 @@ func messageToResponse(m db.Message) map[string]any {
 		"channel_id":     uuidToPtr(m.ChannelID),
 		"recipient_id":   uuidToPtr(m.RecipientID),
 		"recipient_type": textToPtr(m.RecipientType),
-		"session_id":     uuidToPtr(m.SessionID),
 		"content":        m.Content,
 		"content_type":   m.ContentType,
 		"file_id":        uuidToPtr(m.FileID),
@@ -455,7 +444,6 @@ func ptrToInt8(n *int64) pgtype.Int8 {
 func (h *Handler) SendTypingIndicator(w http.ResponseWriter, r *http.Request) {
 	type Req struct {
 		ChannelID string `json:"channel_id"`
-		SessionID string `json:"session_id"`
 		IsTyping  bool   `json:"is_typing"`
 	}
 	var req Req
@@ -469,7 +457,6 @@ func (h *Handler) SendTypingIndicator(w http.ResponseWriter, r *http.Request) {
 
 	h.publish("typing", workspaceID, "member", userID, map[string]any{
 		"channel_id": req.ChannelID,
-		"session_id": req.SessionID,
 		"is_typing":  req.IsTyping,
 		"sender_id":  userID,
 	})

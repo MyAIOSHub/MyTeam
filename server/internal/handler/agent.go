@@ -2,11 +2,14 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -21,56 +24,22 @@ type AgentResponse struct {
 	Description          string          `json:"description"`
 	Instructions         string          `json:"instructions"`
 	AvatarURL            *string         `json:"avatar_url"`
-	RuntimeMode          string          `json:"runtime_mode"`
-	RuntimeConfig        any             `json:"runtime_config"`
 	Visibility           string          `json:"visibility"`
 	Status               string          `json:"status"`
 	MaxConcurrentTasks   int32           `json:"max_concurrent_tasks"`
 	OwnerID              *string         `json:"owner_id"`
 	Skills               []SkillResponse `json:"skills"`
-	Tools                any             `json:"tools"`
-	Triggers             any             `json:"triggers"`
-	CloudLLMConfig       any             `json:"cloud_llm_config,omitempty"`
 	CreatedAt            string          `json:"created_at"`
 	UpdatedAt            string          `json:"updated_at"`
 	ArchivedAt           *string         `json:"archived_at"`
 	ArchivedBy           *string         `json:"archived_by"`
 	AgentType            string          `json:"agent_type"`
-	PageScope            *string         `json:"page_scope"`
+	Scope                *string         `json:"scope"`
 	NeedsAttention       bool            `json:"needs_attention"`
 	NeedsAttentionReason *string         `json:"needs_attention_reason"`
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
-	var rc any
-	if a.RuntimeConfig != nil {
-		json.Unmarshal(a.RuntimeConfig, &rc)
-	}
-	if rc == nil {
-		rc = map[string]any{}
-	}
-
-	var tools any
-	if a.Tools != nil {
-		json.Unmarshal(a.Tools, &tools)
-	}
-	if tools == nil {
-		tools = []any{}
-	}
-
-	var triggers any
-	if a.Triggers != nil {
-		json.Unmarshal(a.Triggers, &triggers)
-	}
-	if triggers == nil {
-		triggers = []any{}
-	}
-
-	var cloudCfg any
-	if a.CloudLlmConfig != nil {
-		json.Unmarshal(a.CloudLlmConfig, &cloudCfg)
-	}
-
 	return AgentResponse{
 		ID:                   uuidToString(a.ID),
 		WorkspaceID:          uuidToString(a.WorkspaceID),
@@ -79,22 +48,17 @@ func agentToResponse(a db.Agent) AgentResponse {
 		Description:          a.Description,
 		Instructions:         a.Instructions,
 		AvatarURL:            textToPtr(a.AvatarUrl),
-		RuntimeMode:          a.RuntimeMode,
-		RuntimeConfig:        rc,
 		Visibility:           a.Visibility,
 		Status:               a.Status,
 		MaxConcurrentTasks:   a.MaxConcurrentTasks,
 		OwnerID:              uuidToPtr(a.OwnerID),
 		Skills:               []SkillResponse{},
-		Tools:                tools,
-		Triggers:             triggers,
-		CloudLLMConfig:       cloudCfg,
 		CreatedAt:            timestampToString(a.CreatedAt),
 		UpdatedAt:            timestampToString(a.UpdatedAt),
 		ArchivedAt:           timestampToPtr(a.ArchivedAt),
 		ArchivedBy:           uuidToPtr(a.ArchivedBy),
 		AgentType:            a.AgentType,
-		PageScope:            textToPtr(a.PageScope),
+		Scope:                textToPtr(a.Scope),
 		NeedsAttention:       a.NeedsAttention,
 		NeedsAttentionReason: textToPtr(a.NeedsAttentionReason),
 	}
@@ -233,11 +197,8 @@ type CreateAgentRequest struct {
 	Instructions       string  `json:"instructions"`
 	AvatarURL          *string `json:"avatar_url"`
 	RuntimeID          string  `json:"runtime_id"`
-	RuntimeConfig      any     `json:"runtime_config"`
 	Visibility         string  `json:"visibility"`
 	MaxConcurrentTasks int32   `json:"max_concurrent_tasks"`
-	Tools              any     `json:"tools"`
-	Triggers           any     `json:"triggers"`
 }
 
 func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
@@ -278,35 +239,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rc, _ := json.Marshal(req.RuntimeConfig)
-	if req.RuntimeConfig == nil {
-		rc = []byte("{}")
-	}
-
-	tools, _ := json.Marshal(req.Tools)
-	if req.Tools == nil {
-		tools = []byte("[]")
-	}
-
-	triggers, _ := json.Marshal(req.Triggers)
-	if req.Triggers == nil {
-		triggers = defaultAgentTriggers()
-	}
-
 	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:        parseUUID(workspaceID),
 		Name:               req.Name,
 		Description:        req.Description,
 		Instructions:       req.Instructions,
 		AvatarUrl:          ptrToText(req.AvatarURL),
-		RuntimeMode:        runtime.RuntimeMode,
-		RuntimeConfig:      rc,
 		RuntimeID:          runtime.ID,
 		Visibility:         req.Visibility,
 		MaxConcurrentTasks: req.MaxConcurrentTasks,
 		OwnerID:            parseUUID(ownerID),
-		Tools:              tools,
-		Triggers:           triggers,
 	})
 	if err != nil {
 		slog.Warn("create agent failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
@@ -334,27 +276,58 @@ type UpdateAgentRequest struct {
 	Instructions       *string `json:"instructions"`
 	AvatarURL          *string `json:"avatar_url"`
 	RuntimeID          *string `json:"runtime_id"`
-	RuntimeConfig      any     `json:"runtime_config"`
 	Visibility         *string `json:"visibility"`
 	Status             *string `json:"status"`
 	MaxConcurrentTasks *int32  `json:"max_concurrent_tasks"`
-	Tools              any     `json:"tools"`
-	Triggers           any     `json:"triggers"`
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.
-// Only the agent owner or workspace owner/admin can manage any agent,
-// regardless of whether it is public or private.
+// Enforces PRD §8.9: only the Agent Owner (personal agent) or a workspace
+// admin/owner may mutate agent state. Implemented with auth.Guards so the
+// permission policy is centralized and testable.
+//
+// System agents (owner_id = NULL) have no Agent Owner — RequireAgentOwner
+// returns a non-forbidden error there; we treat that as "fall through to
+// admin check" rather than a 500.
 func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) bool {
-	wsID := uuidToString(agent.WorkspaceID)
-	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
+	userID, ok := requireUserID(w, r)
 	if !ok {
 		return false
 	}
-	isAdmin := roleAllowed(member.Role, "owner", "admin")
-	isAgentOwner := uuidToString(agent.OwnerID) == requestUserID(r)
-	if !isAdmin && !isAgentOwner {
-		writeError(w, http.StatusForbidden, "only the agent owner can manage this agent")
+
+	agentUUID, err := uuid.Parse(uuidToString(agent.ID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "invalid agent id")
+		return false
+	}
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return false
+	}
+	workspaceUUID, err := uuid.Parse(uuidToString(agent.WorkspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "invalid workspace id")
+		return false
+	}
+
+	// Agent owner is always allowed. Any error (forbidden, no rows, no
+	// owner) falls through to the admin check; we don't surface the
+	// underlying error because the second guard will produce the final
+	// verdict.
+	if err := h.Guards.RequireAgentOwner(r.Context(), agentUUID, userUUID); err == nil {
+		return true
+	}
+
+	// Not the agent owner; allow workspace admin/owner.
+	if err := h.Guards.RequireAdminOrAbove(r.Context(), workspaceUUID, userUUID); err != nil {
+		if errors.Is(err, auth.ErrForbidden) {
+			writeError(w, http.StatusForbidden, "only the agent owner or a workspace admin can manage this agent")
+			return false
+		}
+		// Member lookup failed (e.g. no member row). Treat the same as
+		// forbidden: the request originator is not part of this workspace.
+		writeError(w, http.StatusForbidden, "only the agent owner or a workspace admin can manage this agent")
 		return false
 	}
 	return true
@@ -391,10 +364,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.AvatarURL != nil {
 		params.AvatarUrl = pgtype.Text{String: *req.AvatarURL, Valid: true}
 	}
-	if req.RuntimeConfig != nil {
-		rc, _ := json.Marshal(req.RuntimeConfig)
-		params.RuntimeConfig = rc
-	}
 	if req.RuntimeID != nil {
 		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 			ID:          parseUUID(*req.RuntimeID),
@@ -405,7 +374,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.RuntimeID = runtime.ID
-		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 	}
 	if req.Visibility != nil {
 		params.Visibility = pgtype.Text{String: *req.Visibility, Valid: true}
@@ -415,14 +383,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.MaxConcurrentTasks != nil {
 		params.MaxConcurrentTasks = pgtype.Int4{Int32: *req.MaxConcurrentTasks, Valid: true}
-	}
-	if req.Tools != nil {
-		tools, _ := json.Marshal(req.Tools)
-		params.Tools = tools
-	}
-	if req.Triggers != nil {
-		triggers, _ := json.Marshal(req.Triggers)
-		params.Triggers = triggers
 	}
 
 	agent, err := h.Queries.UpdateAgent(r.Context(), params)

@@ -8,6 +8,7 @@ import type {
   UpdateMemberRequest,
   ListIssuesParams,
   Agent,
+  AgentStatus,
   CreateAgentRequest,
   UpdateAgentRequest,
   AgentTask,
@@ -19,6 +20,7 @@ import type {
   IssueReaction,
   Workspace,
   WorkspaceRepo,
+  WorkspaceSecretMeta,
   MemberWithUser,
   User,
   Skill,
@@ -38,6 +40,10 @@ import type {
   IdentityCard,
   Channel,
   Thread,
+  ThreadContextItem,
+  CreateThreadRequest,
+  CreateThreadContextItemRequest,
+  Message,
   Project,
   ProjectVersion,
   ProjectRun,
@@ -49,6 +55,15 @@ import type {
   AgentProfile,
   RemoteSession,
   FileVersion,
+  Provider,
+  Task,
+  ParticipantSlot,
+  Execution,
+  Artifact,
+  Review,
+  CreateTaskRequest,
+  CreateParticipantSlotRequest,
+  CreateReviewRequest,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
@@ -347,6 +362,11 @@ export class ApiClient {
     return this.fetch(`/api/page-agents/${scope}`);
   }
 
+  // Providers
+  async listProviders(): Promise<Provider[]> {
+    return this.fetch<Provider[]>("/api/providers");
+  }
+
   async listRuntimes(params?: { workspace_id?: string }): Promise<AgentRuntime[]> {
     const search = new URLSearchParams();
     const wsId = params?.workspace_id ?? this.workspaceId;
@@ -491,6 +511,28 @@ export class ApiClient {
     });
   }
 
+  // Workspace Secrets (admin/owner only)
+  async listWorkspaceSecrets(workspaceId: string): Promise<WorkspaceSecretMeta[]> {
+    return this.fetch<WorkspaceSecretMeta[]>(`/api/workspaces/${workspaceId}/secrets`);
+  }
+
+  async getWorkspaceSecret(workspaceId: string, key: string): Promise<{ key: string; value: string }> {
+    return this.fetch(`/api/workspaces/${workspaceId}/secrets/${encodeURIComponent(key)}`);
+  }
+
+  async setWorkspaceSecret(workspaceId: string, key: string, value: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/secrets/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
+  }
+
+  async deleteWorkspaceSecret(workspaceId: string, key: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/secrets/${encodeURIComponent(key)}`, {
+      method: "DELETE",
+    });
+  }
+
   // Members
   async listMembers(workspaceId: string): Promise<MemberWithUser[]> {
     return this.fetch(`/api/workspaces/${workspaceId}/members`);
@@ -627,7 +669,7 @@ export class ApiClient {
   }
 
   // Typing
-  async sendTyping(params: { channel_id?: string; session_id?: string; is_typing: boolean }): Promise<void> {
+  async sendTyping(params: { channel_id?: string; is_typing: boolean }): Promise<void> {
     await this.fetch("/api/typing", { method: "POST", body: JSON.stringify(params) });
   }
 
@@ -636,11 +678,11 @@ export class ApiClient {
   }
 
   // Messages
-  async sendMessage(data: { channel_id?: string; recipient_id?: string; recipient_type?: string; session_id?: string; content: string; content_type?: string; file_id?: string; file_name?: string }) {
+  async sendMessage(data: { channel_id?: string; recipient_id?: string; recipient_type?: string; thread_id?: string; content: string; content_type?: string; file_id?: string; file_name?: string }) {
     return this.fetch<any>('/api/messages', { method: 'POST', body: JSON.stringify(data) })
   }
 
-  async listMessages(params: { channel_id?: string; recipient_id?: string; session_id?: string; limit?: number; offset?: number }) {
+  async listMessages(params: { channel_id?: string; recipient_id?: string; thread_id?: string; limit?: number; offset?: number }) {
     const qs = new URLSearchParams(Object.entries(params).filter(([,v]) => v != null).map(([k,v]) => [k, String(v)])).toString()
     return this.fetch<{ messages: any[] }>(`/api/messages?${qs}`)
   }
@@ -667,27 +709,6 @@ export class ApiClient {
   async getChannelMessages(id: string, limit = 50, offset = 0) {
     return this.fetch<{ messages: any[] }>(`/api/channels/${id}/messages?limit=${limit}&offset=${offset}`)
   }
-
-  // Sessions
-  async listSessions(limit = 20, offset = 0) {
-    return this.fetch<{ sessions: any[] }>(`/api/sessions?limit=${limit}&offset=${offset}`)
-  }
-
-  async createSession(data: { title: string; issue_id?: string; max_turns?: number; context?: any; participants?: Array<{id: string; type: string}> }) {
-    return this.fetch<any>('/api/sessions', { method: 'POST', body: JSON.stringify(data) })
-  }
-
-  async getSession(id: string) { return this.fetch<any>(`/api/sessions/${id}`) }
-
-  async getSessionMessages(id: string) { return this.fetch<{ messages: any[] }>(`/api/sessions/${id}/messages`) }
-
-  async joinSession(id: string) { return this.fetch<void>(`/api/sessions/${id}/join`, { method: 'POST' }) }
-
-  async updateSession(id: string, data: { status?: string; context?: any }) {
-    return this.fetch<any>(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
-  }
-
-  async getSessionSummary(id: string) { return this.fetch<any>(`/api/sessions/${id}/summary`) }
 
   // Plans
   async listPlans(limit = 20, offset = 0) { return this.fetch<{ plans: any[] }>(`/api/plans?limit=${limit}&offset=${offset}`) }
@@ -727,7 +748,7 @@ export class ApiClient {
     });
   }
 
-  async updateAgentStatus(agentId: string, status: { online_status?: string; workload_status?: string }): Promise<void> {
+  async updateAgentStatus(agentId: string, status: { status: AgentStatus }): Promise<void> {
     return this.fetch(`/api/agents/${agentId}/status`, {
       method: "PATCH",
       body: JSON.stringify(status),
@@ -736,7 +757,15 @@ export class ApiClient {
 
   // Threads
   async listThreads(channelId: string): Promise<Thread[]> {
-    return this.fetch(`/api/channels/${channelId}/threads`);
+    const resp = await this.fetch<{ threads: Thread[] }>(`/api/channels/${channelId}/threads`);
+    return resp.threads ?? [];
+  }
+
+  async createThread(channelID: string, body: CreateThreadRequest): Promise<Thread> {
+    return this.fetch<Thread>(`/api/channels/${channelID}/threads`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   }
 
   async getThread(threadId: string): Promise<Thread> {
@@ -747,10 +776,51 @@ export class ApiClient {
     return this.fetch<{ messages: any[] }>(`/api/threads/${threadId}/messages?limit=${limit}&offset=${offset}`);
   }
 
-  async sendThreadMessage(threadId: string, content: string) {
-    return this.fetch<any>('/api/messages', {
+  async listThreadMessages(threadID: string, params?: { limit?: number; offset?: number }): Promise<Message[]> {
+    const query = new URLSearchParams();
+    if (params?.limit != null) query.set("limit", String(params.limit));
+    if (params?.offset != null) query.set("offset", String(params.offset));
+    const qs = query.toString();
+    const resp = await this.fetch<{ messages: Message[] }>(
+      `/api/threads/${threadID}/messages${qs ? "?" + qs : ""}`,
+    );
+    return resp.messages ?? [];
+  }
+
+  async sendThreadMessage(threadId: string, content: string): Promise<Message> {
+    return this.fetch<Message>(`/api/threads/${threadId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ thread_id: threadId, content }),
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  async postThreadMessage(threadID: string, body: { content: string }): Promise<Message> {
+    return this.fetch<Message>(`/api/threads/${threadID}/messages`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async listThreadContextItems(threadID: string): Promise<ThreadContextItem[]> {
+    const resp = await this.fetch<{ items: ThreadContextItem[] }>(
+      `/api/threads/${threadID}/context-items`,
+    );
+    return resp.items ?? [];
+  }
+
+  async createThreadContextItem(
+    threadID: string,
+    body: CreateThreadContextItemRequest,
+  ): Promise<ThreadContextItem> {
+    return this.fetch<ThreadContextItem>(`/api/threads/${threadID}/context-items`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteThreadContextItem(threadID: string, itemID: string): Promise<void> {
+    await this.fetch<void>(`/api/threads/${threadID}/context-items/${itemID}`, {
+      method: "DELETE",
     });
   }
 
@@ -876,20 +946,6 @@ export class ApiClient {
     return this.fetch("/api/metrics");
   }
 
-  // Session Auto-Discussion
-  async startAutoDiscussion(sessionId: string): Promise<void> {
-    await this.fetch(`/api/sessions/${sessionId}/auto-start`, { method: "POST" });
-  }
-
-  async stopAutoDiscussion(sessionId: string): Promise<void> {
-    await this.fetch(`/api/sessions/${sessionId}/auto-stop`, { method: "POST" });
-  }
-
-  // Session Context
-  async shareSessionContext(sessionId: string, context: { files?: Array<{ name: string; content?: string }>; summary?: string; decision?: string }): Promise<void> {
-    await this.fetch(`/api/sessions/${sessionId}/context`, { method: "PUT", body: JSON.stringify(context) });
-  }
-
   // Remote Sessions
   async listRemoteSessions(): Promise<RemoteSession[]> {
     return this.fetch("/api/remote-sessions");
@@ -908,10 +964,58 @@ export class ApiClient {
     return this.fetch<Agent>("/api/personal-agent");
   }
 
-  async updatePersonalAgentConfig(config: Record<string, unknown>): Promise<Agent> {
-    return this.fetch<Agent>("/api/personal-agent/config", {
-      method: "PATCH",
-      body: JSON.stringify({ cloud_llm_config: config }),
+  // ===== Plan 5 — Task / Slot / Execution / Artifact / Review =====
+
+  async createTask(body: CreateTaskRequest): Promise<Task> {
+    return this.fetch<Task>(`/api/tasks`, { method: "POST", body: JSON.stringify(body) });
+  }
+
+  async getTask(id: string): Promise<Task> {
+    return this.fetch<Task>(`/api/tasks/${id}`);
+  }
+
+  async listTasksByPlan(planId: string): Promise<Task[]> {
+    // Server may wrap as {tasks: []}; if so, unwrap. Adapt after Batch D wires API.
+    const resp = await this.fetch<{ tasks: Task[] } | Task[]>(`/api/plans/${planId}/tasks`);
+    return Array.isArray(resp) ? resp : resp.tasks ?? [];
+  }
+
+  async listSlotsByTask(taskId: string): Promise<ParticipantSlot[]> {
+    const resp = await this.fetch<{ slots: ParticipantSlot[] } | ParticipantSlot[]>(`/api/tasks/${taskId}/slots`);
+    return Array.isArray(resp) ? resp : resp.slots ?? [];
+  }
+
+  async createSlot(body: CreateParticipantSlotRequest): Promise<ParticipantSlot> {
+    return this.fetch<ParticipantSlot>(`/api/tasks/${body.task_id}/slots`, {
+      method: "POST", body: JSON.stringify(body),
     });
+  }
+
+  async listExecutionsByTask(taskId: string): Promise<Execution[]> {
+    const resp = await this.fetch<{ executions: Execution[] } | Execution[]>(`/api/tasks/${taskId}/executions`);
+    return Array.isArray(resp) ? resp : resp.executions ?? [];
+  }
+
+  async listArtifactsByTask(taskId: string): Promise<Artifact[]> {
+    const resp = await this.fetch<{ artifacts: Artifact[] } | Artifact[]>(`/api/tasks/${taskId}/artifacts`);
+    return Array.isArray(resp) ? resp : resp.artifacts ?? [];
+  }
+
+  async createReview(body: CreateReviewRequest): Promise<Review> {
+    return this.fetch<Review>(`/api/artifacts/${body.artifact_id}/reviews`, {
+      method: "POST", body: JSON.stringify(body),
+    });
+  }
+
+  async listReviewsForArtifact(artifactId: string): Promise<Review[]> {
+    const resp = await this.fetch<{ reviews: Review[] } | Review[]>(`/api/artifacts/${artifactId}/reviews`);
+    return Array.isArray(resp) ? resp : resp.reviews ?? [];
+  }
+
+  // Kicks off a ProjectRun via SchedulerService.ScheduleRun. Server returns
+  // 202 Accepted with no body — the run id is the same one the caller passed
+  // in, so there's nothing to thread back through the response.
+  async startRun(runId: string): Promise<void> {
+    await this.fetch<void>(`/api/runs/${runId}/start`, { method: "POST" });
   }
 }

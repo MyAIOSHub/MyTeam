@@ -25,10 +25,12 @@ type DaemonRegisterRequest struct {
 	DeviceName  string `json:"device_name"`
 	CLIVersion  string `json:"cli_version"` // multica CLI version
 	Runtimes    []struct {
-		Name    string `json:"name"`
-		Type    string `json:"type"`
-		Version string `json:"version"` // agent CLI version (claude/codex)
-		Status  string `json:"status"`
+		Name             string `json:"name"`
+		Type             string `json:"type"`
+		Version          string `json:"version"` // agent CLI version (claude/codex)
+		Status           string `json:"status"`
+		Mode             string `json:"mode"`              // canonical execution mode (local|cloud|...)
+		ConcurrencyLimit int32  `json:"concurrency_limit"` // phase 1: defaults to 1 when absent
 	} `json:"runtimes"`
 }
 
@@ -87,9 +89,19 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			deviceInfo = runtime.Version
 		}
 		status := "online"
-		if runtime.Status == "offline" {
-			status = "offline"
+		switch runtime.Status {
+		case "offline", "degraded":
+			status = runtime.Status
 		}
+		// Default to "local" when the daemon doesn't supply a mode.
+		mode := strings.TrimSpace(runtime.Mode)
+		if mode == "" {
+			mode = "local"
+		}
+		// Phase 1: concurrency_limit defaults to 1 if the daemon doesn't supply it.
+		// current_load, lease_expires_at, and last_heartbeat_at are server-managed
+		// and intentionally not read from the request body.
+		_ = runtime.ConcurrencyLimit // accepted but not yet persisted via existing upsert query
 		metadata, _ := json.Marshal(map[string]any{
 			"version":     runtime.Version,
 			"cli_version": req.CLIVersion,
@@ -99,7 +111,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: parseUUID(req.WorkspaceID),
 			DaemonID:    strToText(req.DaemonID),
 			Name:        name,
-			RuntimeMode: "local",
+			Mode:        pgtype.Text{String: mode, Valid: mode != ""},
 			Provider:    provider,
 			Status:      status,
 			DeviceInfo:  deviceInfo,

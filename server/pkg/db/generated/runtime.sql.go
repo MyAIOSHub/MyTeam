@@ -11,16 +11,38 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acquireRuntimeLease = `-- name: AcquireRuntimeLease :exec
+UPDATE agent_runtime
+SET lease_expires_at = $2,
+    updated_at       = now()
+WHERE id = $1
+`
+
+type AcquireRuntimeLeaseParams struct {
+	ID             pgtype.UUID        `json:"id"`
+	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+}
+
+func (q *Queries) AcquireRuntimeLease(ctx context.Context, arg AcquireRuntimeLeaseParams) error {
+	_, err := q.db.Exec(ctx, acquireRuntimeLease, arg.ID, arg.LeaseExpiresAt)
+	return err
+}
+
 const ensureCloudRuntime = `-- name: EnsureCloudRuntime :one
 INSERT INTO agent_runtime (
-    workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+    workspace_id, daemon_id, name, mode, provider, status, device_info, metadata, last_heartbeat_at
 ) VALUES ($1, 'cloud', 'Cloud LLM', 'cloud', 'cloud_llm', 'online', 'cloud', '{}', now())
 ON CONFLICT (workspace_id, daemon_id, provider)
 DO UPDATE SET
     status = 'online',
-    last_seen_at = now(),
+    last_heartbeat_at = now(),
     updated_at = now()
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at
+RETURNING
+    id, workspace_id, daemon_id, name, provider, status,
+    device_info, metadata, created_at, updated_at,
+    server_host, working_dir, capabilities, last_heartbeat,
+    readiness, concurrency_limit, current_load, lease_expires_at,
+    last_heartbeat_at, mode
 `
 
 func (q *Queries) EnsureCloudRuntime(ctx context.Context, workspaceID pgtype.UUID) (AgentRuntime, error) {
@@ -31,14 +53,22 @@ func (q *Queries) EnsureCloudRuntime(ctx context.Context, workspaceID pgtype.UUI
 		&i.WorkspaceID,
 		&i.DaemonID,
 		&i.Name,
-		&i.RuntimeMode,
 		&i.Provider,
 		&i.Status,
 		&i.DeviceInfo,
 		&i.Metadata,
-		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ServerHost,
+		&i.WorkingDir,
+		&i.Capabilities,
+		&i.LastHeartbeat,
+		&i.Readiness,
+		&i.ConcurrencyLimit,
+		&i.CurrentLoad,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Mode,
 	)
 	return i, err
 }
@@ -82,7 +112,13 @@ func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]FailTasksF
 }
 
 const getAgentRuntime = `-- name: GetAgentRuntime :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at FROM agent_runtime
+SELECT
+    id, workspace_id, daemon_id, name, provider, status,
+    device_info, metadata, created_at, updated_at,
+    server_host, working_dir, capabilities, last_heartbeat,
+    readiness, concurrency_limit, current_load, lease_expires_at,
+    last_heartbeat_at, mode
+FROM agent_runtime
 WHERE id = $1
 `
 
@@ -94,20 +130,34 @@ func (q *Queries) GetAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRun
 		&i.WorkspaceID,
 		&i.DaemonID,
 		&i.Name,
-		&i.RuntimeMode,
 		&i.Provider,
 		&i.Status,
 		&i.DeviceInfo,
 		&i.Metadata,
-		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ServerHost,
+		&i.WorkingDir,
+		&i.Capabilities,
+		&i.LastHeartbeat,
+		&i.Readiness,
+		&i.ConcurrencyLimit,
+		&i.CurrentLoad,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Mode,
 	)
 	return i, err
 }
 
 const getAgentRuntimeForWorkspace = `-- name: GetAgentRuntimeForWorkspace :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at FROM agent_runtime
+SELECT
+    id, workspace_id, daemon_id, name, provider, status,
+    device_info, metadata, created_at, updated_at,
+    server_host, working_dir, capabilities, last_heartbeat,
+    readiness, concurrency_limit, current_load, lease_expires_at,
+    last_heartbeat_at, mode
+FROM agent_runtime
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -124,21 +174,35 @@ func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentR
 		&i.WorkspaceID,
 		&i.DaemonID,
 		&i.Name,
-		&i.RuntimeMode,
 		&i.Provider,
 		&i.Status,
 		&i.DeviceInfo,
 		&i.Metadata,
-		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ServerHost,
+		&i.WorkingDir,
+		&i.Capabilities,
+		&i.LastHeartbeat,
+		&i.Readiness,
+		&i.ConcurrencyLimit,
+		&i.CurrentLoad,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Mode,
 	)
 	return i, err
 }
 
 const getCloudRuntime = `-- name: GetCloudRuntime :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at FROM agent_runtime
-WHERE workspace_id = $1 AND runtime_mode = 'cloud' AND provider = 'cloud_llm'
+SELECT
+    id, workspace_id, daemon_id, name, provider, status,
+    device_info, metadata, created_at, updated_at,
+    server_host, working_dir, capabilities, last_heartbeat,
+    readiness, concurrency_limit, current_load, lease_expires_at,
+    last_heartbeat_at, mode
+FROM agent_runtime
+WHERE workspace_id = $1 AND mode = 'cloud' AND provider = 'cloud_llm'
 LIMIT 1
 `
 
@@ -150,24 +214,42 @@ func (q *Queries) GetCloudRuntime(ctx context.Context, workspaceID pgtype.UUID) 
 		&i.WorkspaceID,
 		&i.DaemonID,
 		&i.Name,
-		&i.RuntimeMode,
 		&i.Provider,
 		&i.Status,
 		&i.DeviceInfo,
 		&i.Metadata,
-		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ServerHost,
+		&i.WorkingDir,
+		&i.Capabilities,
+		&i.LastHeartbeat,
+		&i.Readiness,
+		&i.ConcurrencyLimit,
+		&i.CurrentLoad,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Mode,
 	)
 	return i, err
 }
 
 const listAgentRuntimes = `-- name: ListAgentRuntimes :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at FROM agent_runtime
+
+SELECT
+    id, workspace_id, daemon_id, name, provider, status,
+    device_info, metadata, created_at, updated_at,
+    server_host, working_dir, capabilities, last_heartbeat,
+    readiness, concurrency_limit, current_load, lease_expires_at,
+    last_heartbeat_at, mode
+FROM agent_runtime
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
 
+// Common column list for agent_runtime SELECTs after Account Phase 2 drops:
+// excludes runtime_mode, last_seen_at. Reads of runtime_mode -> mode,
+// reads of last_seen_at -> last_heartbeat_at.
 func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID) ([]AgentRuntime, error) {
 	rows, err := q.db.Query(ctx, listAgentRuntimes, workspaceID)
 	if err != nil {
@@ -182,14 +264,79 @@ func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID
 			&i.WorkspaceID,
 			&i.DaemonID,
 			&i.Name,
-			&i.RuntimeMode,
 			&i.Provider,
 			&i.Status,
 			&i.DeviceInfo,
 			&i.Metadata,
-			&i.LastSeenAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ServerHost,
+			&i.WorkingDir,
+			&i.Capabilities,
+			&i.LastHeartbeat,
+			&i.Readiness,
+			&i.ConcurrencyLimit,
+			&i.CurrentLoad,
+			&i.LeaseExpiresAt,
+			&i.LastHeartbeatAt,
+			&i.Mode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCloudRuntimes = `-- name: ListCloudRuntimes :many
+SELECT
+    id, workspace_id, daemon_id, name, provider, status,
+    device_info, metadata, created_at, updated_at,
+    server_host, working_dir, capabilities, last_heartbeat,
+    readiness, concurrency_limit, current_load, lease_expires_at,
+    last_heartbeat_at, mode
+FROM agent_runtime
+WHERE mode = 'cloud' AND status IN ('online', 'degraded')
+ORDER BY current_load ASC NULLS LAST, created_at ASC
+`
+
+// Lists all cloud-mode runtimes that are in a serviceable state.
+// Used by CloudExecutorService to fan out execution claims across
+// workspaces. Ordered by current_load ASC so lighter runtimes are
+// preferred when claims race.
+func (q *Queries) ListCloudRuntimes(ctx context.Context) ([]AgentRuntime, error) {
+	rows, err := q.db.Query(ctx, listCloudRuntimes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentRuntime{}
+	for rows.Next() {
+		var i AgentRuntime
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.DaemonID,
+			&i.Name,
+			&i.Provider,
+			&i.Status,
+			&i.DeviceInfo,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ServerHost,
+			&i.WorkingDir,
+			&i.Capabilities,
+			&i.LastHeartbeat,
+			&i.Readiness,
+			&i.ConcurrencyLimit,
+			&i.CurrentLoad,
+			&i.LeaseExpiresAt,
+			&i.LastHeartbeatAt,
+			&i.Mode,
 		); err != nil {
 			return nil, err
 		}
@@ -205,7 +352,7 @@ const markStaleRuntimesOffline = `-- name: MarkStaleRuntimesOffline :many
 UPDATE agent_runtime
 SET status = 'offline', updated_at = now()
 WHERE status = 'online'
-  AND last_seen_at < now() - make_interval(secs => $1::double precision)
+  AND last_heartbeat_at < now() - make_interval(secs => $1::double precision)
 RETURNING id, workspace_id
 `
 
@@ -245,11 +392,54 @@ func (q *Queries) SetAgentRuntimeOffline(ctx context.Context, id pgtype.UUID) er
 	return err
 }
 
+const setRuntimeLoad = `-- name: SetRuntimeLoad :exec
+UPDATE agent_runtime
+SET current_load = $2,
+    updated_at   = now()
+WHERE id = $1
+`
+
+type SetRuntimeLoadParams struct {
+	ID          pgtype.UUID `json:"id"`
+	CurrentLoad int32       `json:"current_load"`
+}
+
+func (q *Queries) SetRuntimeLoad(ctx context.Context, arg SetRuntimeLoadParams) error {
+	_, err := q.db.Exec(ctx, setRuntimeLoad, arg.ID, arg.CurrentLoad)
+	return err
+}
+
+const setRuntimeMetadataKey = `-- name: SetRuntimeMetadataKey :exec
+UPDATE agent_runtime
+SET metadata   = jsonb_set(COALESCE(metadata, '{}'::jsonb), ARRAY[$1::TEXT], $2::JSONB, TRUE),
+    updated_at = now()
+WHERE id = $3
+`
+
+type SetRuntimeMetadataKeyParams struct {
+	Key   string      `json:"key"`
+	Value []byte      `json:"value"`
+	ID    pgtype.UUID `json:"id"`
+}
+
+// Merges a single key into the runtime.metadata JSONB document.
+// Used to store per-agent or per-runtime config (e.g. cloud_llm_config)
+// alongside the runtime instead of on the agent row itself.
+func (q *Queries) SetRuntimeMetadataKey(ctx context.Context, arg SetRuntimeMetadataKeyParams) error {
+	_, err := q.db.Exec(ctx, setRuntimeMetadataKey, arg.Key, arg.Value, arg.ID)
+	return err
+}
+
 const updateAgentRuntimeHeartbeat = `-- name: UpdateAgentRuntimeHeartbeat :one
 UPDATE agent_runtime
-SET status = 'online', last_seen_at = now(), updated_at = now()
+SET status = 'online', last_heartbeat_at = now(), updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at
+RETURNING
+    id, workspace_id, daemon_id, name, provider, status,
+    device_info, metadata, created_at, updated_at,
+    server_host, working_dir, capabilities, last_heartbeat,
+    readiness, concurrency_limit, current_load, lease_expires_at,
+    last_heartbeat_at, mode
 `
 
 func (q *Queries) UpdateAgentRuntimeHeartbeat(ctx context.Context, id pgtype.UUID) (AgentRuntime, error) {
@@ -260,16 +450,42 @@ func (q *Queries) UpdateAgentRuntimeHeartbeat(ctx context.Context, id pgtype.UUI
 		&i.WorkspaceID,
 		&i.DaemonID,
 		&i.Name,
-		&i.RuntimeMode,
 		&i.Provider,
 		&i.Status,
 		&i.DeviceInfo,
 		&i.Metadata,
-		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ServerHost,
+		&i.WorkingDir,
+		&i.Capabilities,
+		&i.LastHeartbeat,
+		&i.Readiness,
+		&i.ConcurrencyLimit,
+		&i.CurrentLoad,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Mode,
 	)
 	return i, err
+}
+
+const updateRuntimeHeartbeat = `-- name: UpdateRuntimeHeartbeat :exec
+UPDATE agent_runtime
+SET last_heartbeat_at = now(),
+    status            = COALESCE($2, status),
+    updated_at        = now()
+WHERE id = $1
+`
+
+type UpdateRuntimeHeartbeatParams struct {
+	ID     pgtype.UUID `json:"id"`
+	Status pgtype.Text `json:"status"`
+}
+
+func (q *Queries) UpdateRuntimeHeartbeat(ctx context.Context, arg UpdateRuntimeHeartbeatParams) error {
+	_, err := q.db.Exec(ctx, updateRuntimeHeartbeat, arg.ID, arg.Status)
+	return err
 }
 
 const upsertAgentRuntime = `-- name: UpsertAgentRuntime :one
@@ -277,30 +493,35 @@ INSERT INTO agent_runtime (
     workspace_id,
     daemon_id,
     name,
-    runtime_mode,
+    mode,
     provider,
     status,
     device_info,
     metadata,
-    last_seen_at
+    last_heartbeat_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
 ON CONFLICT (workspace_id, daemon_id, provider)
 DO UPDATE SET
     name = EXCLUDED.name,
-    runtime_mode = EXCLUDED.runtime_mode,
+    mode = EXCLUDED.mode,
     status = EXCLUDED.status,
     device_info = EXCLUDED.device_info,
     metadata = EXCLUDED.metadata,
-    last_seen_at = now(),
+    last_heartbeat_at = now(),
     updated_at = now()
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at
+RETURNING
+    id, workspace_id, daemon_id, name, provider, status,
+    device_info, metadata, created_at, updated_at,
+    server_host, working_dir, capabilities, last_heartbeat,
+    readiness, concurrency_limit, current_load, lease_expires_at,
+    last_heartbeat_at, mode
 `
 
 type UpsertAgentRuntimeParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	DaemonID    pgtype.Text `json:"daemon_id"`
 	Name        string      `json:"name"`
-	RuntimeMode string      `json:"runtime_mode"`
+	Mode        pgtype.Text `json:"mode"`
 	Provider    string      `json:"provider"`
 	Status      string      `json:"status"`
 	DeviceInfo  string      `json:"device_info"`
@@ -312,7 +533,7 @@ func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntime
 		arg.WorkspaceID,
 		arg.DaemonID,
 		arg.Name,
-		arg.RuntimeMode,
+		arg.Mode,
 		arg.Provider,
 		arg.Status,
 		arg.DeviceInfo,
@@ -324,14 +545,22 @@ func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntime
 		&i.WorkspaceID,
 		&i.DaemonID,
 		&i.Name,
-		&i.RuntimeMode,
 		&i.Provider,
 		&i.Status,
 		&i.DeviceInfo,
 		&i.Metadata,
-		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ServerHost,
+		&i.WorkingDir,
+		&i.Capabilities,
+		&i.LastHeartbeat,
+		&i.Readiness,
+		&i.ConcurrencyLimit,
+		&i.CurrentLoad,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Mode,
 	)
 	return i, err
 }

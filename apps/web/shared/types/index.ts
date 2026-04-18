@@ -4,9 +4,6 @@ export type {
   AgentStatus,
   AgentRuntimeMode,
   AgentVisibility,
-  AgentTriggerType,
-  AgentTool,
-  AgentTrigger,
   AgentTask,
   AgentRuntime,
   RuntimeDevice,
@@ -24,13 +21,12 @@ export type {
   RuntimeUpdate,
   RuntimeUpdateStatus,
   AgentType,
-  AgentOnlineStatus,
-  AgentWorkloadStatus,
+  AgentScope,
   IdentityCard,
   AgentAutoReplyConfig,
   AgentProfile,
 } from "./agent";
-export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser } from "./workspace";
+export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, WorkspaceSecretMeta, SetWorkspaceSecretRequest } from "./workspace";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
 export type { TimelineEntry } from "./activity";
@@ -42,10 +38,15 @@ export type {
   Message,
   Channel,
   ChannelMember,
-  Session,
-  SessionParticipant,
   Conversation,
   Thread,
+  ThreadStatus,
+  ThreadCreatorType,
+  ThreadContextItem,
+  ThreadContextItemType,
+  RetentionClass,
+  CreateThreadRequest,
+  CreateThreadContextItemRequest,
   RemoteSession,
   RemoteSessionEvent,
 } from "./messaging";
@@ -65,6 +66,26 @@ export type {
   ProjectRun,
   RunStatus,
   CreateProjectFromChatRequest,
+  Task,
+  TaskStatus,
+  CollaborationMode,
+  TaskTimeoutRule,
+  TaskRetryRule,
+  TaskEscalationPolicy,
+  ParticipantSlot,
+  SlotType,
+  SlotTrigger,
+  SlotStatus,
+  Execution,
+  ExecutionStatus,
+  ExecutionContextRef,
+  Artifact,
+  ArtifactType,
+  Review,
+  ReviewDecision,
+  CreateTaskRequest,
+  CreateParticipantSlotRequest,
+  CreateReviewRequest,
 } from "./project";
 export type { FileIndex, FileSnapshot, WorkspaceMetrics } from "./file";
 export type { SearchResult, SearchResponse } from "./search";
@@ -75,3 +96,4 @@ export type {
   BrowserTab,
   BrowserContext,
 } from "./workspace-substrate";
+export type { Provider, ProviderKind } from "./provider";

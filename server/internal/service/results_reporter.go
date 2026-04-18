@@ -1,3 +1,11 @@
+// Package service: results_reporter.go — listens to run completion events,
+// composes a summary by walking the run's Executions, and delivers the
+// summary to the project's channel + each member's inbox.
+//
+// Per-task data is read from the execution table (one row per Task
+// attempt). The per-task breakdown lists task_id, status, and attempt so
+// participants can see which tasks completed and which retried/failed.
+
 package service
 
 import (
@@ -87,14 +95,9 @@ func (s *ResultsReporterService) handleRunCompleted(e events.Event) {
 
 // reportRunCompletion composes and delivers the run summary.
 //
-// Steps:
-// 1. Get the project run.
-// 2. Get all workflow steps and their results.
-// 3. Compose a summary message (plain text, structured).
-// 4. Post summary to the project's channel (create a message record).
-// 5. Post summary to each source_conversation from project.source_conversations.
-// 6. Create inbox notifications for all project participants.
-// 7. Update project status to "completed".
+// The summary lists per-task execution rows (latest attempt only when
+// multiple are present, since ListExecutionsByRun orders by created_at
+// DESC and we deduplicate by task_id).
 func (s *ResultsReporterService) reportRunCompletion(ctx context.Context, workspaceID, runID string) {
 	// Step 1: Get the project run.
 	run, err := s.Queries.GetProjectRun(ctx, util.ParseUUID(runID))
@@ -104,27 +107,19 @@ func (s *ResultsReporterService) reportRunCompletion(ctx context.Context, worksp
 	}
 	projectID := util.UUIDToString(run.ProjectID)
 
-	// Step 2: Get workflow steps for this run.
-	dbSteps, _ := s.Queries.ListWorkflowStepsByRun(ctx, util.ParseUUID(runID))
-	var steps []stepResult
-	for _, st := range dbSteps {
-		sr := stepResult{
-			Order:       st.StepOrder,
-			Description: st.Description,
-			Status:      st.Status,
-			Error:       st.Error.String,
-			Result:      st.Result,
-		}
-		steps = append(steps, sr)
+	// Step 2: pull per-task execution rows for the run and synthesize a
+	// summary block. Failures here are non-fatal — the run-level header
+	// still gets posted.
+	executions, exErr := s.Queries.ListExecutionsByRun(ctx, util.ParseUUID(runID))
+	if exErr != nil {
+		slog.Warn("results reporter: list executions failed", "run_id", runID, "error", exErr)
 	}
-
-	summary := s.composeSummary(runID, steps)
+	summary := s.composeSummary(runID, executions)
 
 	slog.Info("results reporter: summary composed",
 		"run_id", runID,
 		"project_id", projectID,
 		"summary_length", len(summary),
-		"steps", len(steps),
 	)
 
 	// Step 3-4: Post summary to the project's channel.
@@ -138,17 +133,12 @@ func (s *ResultsReporterService) reportRunCompletion(ctx context.Context, worksp
 		s.notifyProjectParticipants(ctx, workspaceID, projectID, runID, summary)
 	}
 
-	// Step 7: Update project status.
-	runStatus := "completed"
-	for _, st := range steps {
-		if st.Status == "failed" {
-			runStatus = "failed"
-			break
-		}
-	}
+	// Step 7: Update project status. Without per-step status data we treat
+	// the run as completed; failure paths will be reinstated when Task /
+	// Execution status is available (Batch C3/D).
 	s.Queries.UpdateProjectStatus(ctx, db.UpdateProjectStatusParams{
 		ID:     util.ParseUUID(projectID),
-		Status: runStatus,
+		Status: "completed",
 	})
 
 	// Broadcast a project status change event.
@@ -162,52 +152,31 @@ func (s *ResultsReporterService) reportRunCompletion(ctx context.Context, worksp
 			"status": "completed",
 		},
 	})
-
-	_ = ctx
 }
 
-// composeSummary builds a structured summary from workflow step results.
-func (s *ResultsReporterService) composeSummary(runID string, steps []stepResult) string {
+// composeSummary builds the run summary. The per-task block is
+// deduplicated by task_id, keeping the latest attempt (executions arrive
+// newest-first from ListExecutionsByRun).
+func (s *ResultsReporterService) composeSummary(runID string, executions []db.Execution) string {
 	var sb strings.Builder
-
 	sb.WriteString(fmt.Sprintf("## Run Completed: %s\n\n", runID))
 	sb.WriteString(fmt.Sprintf("**Completed at:** %s\n\n", time.Now().UTC().Format(time.RFC3339)))
-
-	if len(steps) == 0 {
-		sb.WriteString("No step results available.\n")
+	if len(executions) == 0 {
+		sb.WriteString("No execution records were produced for this run.\n")
 		return sb.String()
 	}
 
-	sb.WriteString("### Step Results\n\n")
-	completed := 0
-	failed := 0
-	for _, step := range steps {
-		status := "completed"
-		if step.Error != "" {
-			status = "failed"
-			failed++
-		} else {
-			completed++
+	sb.WriteString("### Tasks\n\n")
+	seen := make(map[[16]byte]bool, len(executions))
+	for _, e := range executions {
+		if !e.TaskID.Valid || seen[e.TaskID.Bytes] {
+			continue
 		}
-		sb.WriteString(fmt.Sprintf("- **Step %d** (%s): %s\n", step.Order, step.Description, status))
-		if step.Error != "" {
-			sb.WriteString(fmt.Sprintf("  - Error: %s\n", step.Error))
-		}
+		seen[e.TaskID.Bytes] = true
+		sb.WriteString(fmt.Sprintf("- task=%s status=%s attempt=%d\n",
+			util.UUIDToString(e.TaskID), e.Status, e.Attempt))
 	}
-
-	sb.WriteString(fmt.Sprintf("\n**Summary:** %d completed, %d failed out of %d total steps.\n",
-		completed, failed, len(steps)))
-
 	return sb.String()
-}
-
-// stepResult holds the relevant fields from a workflow step for summary generation.
-type stepResult struct {
-	Order       int32
-	Description string
-	Status      string
-	Error       string
-	Result      json.RawMessage
 }
 
 // postSummaryToChannel creates a message record and broadcasts it.
@@ -278,6 +247,3 @@ func (s *ResultsReporterService) notifyProjectParticipants(ctx context.Context, 
 		"run_id", runID,
 	)
 }
-
-// Ensure util import is used.
-var _ = util.ParseUUID

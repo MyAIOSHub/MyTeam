@@ -188,7 +188,7 @@ export class DesktopApiClient {
   async listMessages(params: {
     channel_id?: string;
     recipient_id?: string;
-    session_id?: string;
+    thread_id?: string;
     limit?: number;
     offset?: number;
   }): Promise<{ messages: Message[] }> {
@@ -213,7 +213,7 @@ export class DesktopApiClient {
     channel_id?: string;
     recipient_id?: string;
     recipient_type?: "member" | "agent";
-    session_id?: string;
+    thread_id?: string;
     content: string;
     content_type?: "text" | "json" | "file";
     file_id?: string;

@@ -28,7 +28,7 @@ func (q *Queries) CompleteProjectRun(ctx context.Context, arg CompleteProjectRun
 const createProjectRun = `-- name: CreateProjectRun :one
 INSERT INTO project_run (plan_id, project_id, status)
 VALUES ($1, $2, $3)
-RETURNING id, plan_id, project_id, status, start_at, end_at, step_logs, output_refs, failure_reason, retry_count, created_at, updated_at
+RETURNING id, plan_id, project_id, status, start_at, end_at, step_logs, output_refs, failure_reason, created_at, updated_at
 `
 
 type CreateProjectRunParams struct {
@@ -50,7 +50,6 @@ func (q *Queries) CreateProjectRun(ctx context.Context, arg CreateProjectRunPara
 		&i.StepLogs,
 		&i.OutputRefs,
 		&i.FailureReason,
-		&i.RetryCount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -58,7 +57,7 @@ func (q *Queries) CreateProjectRun(ctx context.Context, arg CreateProjectRunPara
 }
 
 const failProjectRun = `-- name: FailProjectRun :exec
-UPDATE project_run SET status = 'failed', end_at = NOW(), failure_reason = $1, retry_count = retry_count + 1, updated_at = NOW() WHERE id = $2
+UPDATE project_run SET status = 'failed', end_at = NOW(), failure_reason = $1, updated_at = NOW() WHERE id = $2
 `
 
 type FailProjectRunParams struct {
@@ -72,7 +71,7 @@ func (q *Queries) FailProjectRun(ctx context.Context, arg FailProjectRunParams) 
 }
 
 const getActiveProjectRun = `-- name: GetActiveProjectRun :one
-SELECT id, plan_id, project_id, status, start_at, end_at, step_logs, output_refs, failure_reason, retry_count, created_at, updated_at FROM project_run WHERE project_id = $1 AND status IN ('pending', 'running') LIMIT 1
+SELECT id, plan_id, project_id, status, start_at, end_at, step_logs, output_refs, failure_reason, created_at, updated_at FROM project_run WHERE project_id = $1 AND status IN ('pending', 'running') LIMIT 1
 `
 
 func (q *Queries) GetActiveProjectRun(ctx context.Context, projectID pgtype.UUID) (ProjectRun, error) {
@@ -88,7 +87,6 @@ func (q *Queries) GetActiveProjectRun(ctx context.Context, projectID pgtype.UUID
 		&i.StepLogs,
 		&i.OutputRefs,
 		&i.FailureReason,
-		&i.RetryCount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -96,7 +94,7 @@ func (q *Queries) GetActiveProjectRun(ctx context.Context, projectID pgtype.UUID
 }
 
 const getProjectRun = `-- name: GetProjectRun :one
-SELECT id, plan_id, project_id, status, start_at, end_at, step_logs, output_refs, failure_reason, retry_count, created_at, updated_at FROM project_run WHERE id = $1
+SELECT id, plan_id, project_id, status, start_at, end_at, step_logs, output_refs, failure_reason, created_at, updated_at FROM project_run WHERE id = $1
 `
 
 func (q *Queries) GetProjectRun(ctx context.Context, id pgtype.UUID) (ProjectRun, error) {
@@ -112,7 +110,6 @@ func (q *Queries) GetProjectRun(ctx context.Context, id pgtype.UUID) (ProjectRun
 		&i.StepLogs,
 		&i.OutputRefs,
 		&i.FailureReason,
-		&i.RetryCount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -120,7 +117,7 @@ func (q *Queries) GetProjectRun(ctx context.Context, id pgtype.UUID) (ProjectRun
 }
 
 const listProjectRuns = `-- name: ListProjectRuns :many
-SELECT id, plan_id, project_id, status, start_at, end_at, step_logs, output_refs, failure_reason, retry_count, created_at, updated_at FROM project_run WHERE project_id = $1 ORDER BY created_at DESC
+SELECT id, plan_id, project_id, status, start_at, end_at, step_logs, output_refs, failure_reason, created_at, updated_at FROM project_run WHERE project_id = $1 ORDER BY created_at DESC
 `
 
 func (q *Queries) ListProjectRuns(ctx context.Context, projectID pgtype.UUID) ([]ProjectRun, error) {
@@ -142,7 +139,6 @@ func (q *Queries) ListProjectRuns(ctx context.Context, projectID pgtype.UUID) ([
 			&i.StepLogs,
 			&i.OutputRefs,
 			&i.FailureReason,
-			&i.RetryCount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
