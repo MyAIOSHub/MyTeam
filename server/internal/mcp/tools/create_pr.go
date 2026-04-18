@@ -2,9 +2,10 @@ package tools
 
 import (
 	"context"
+	"fmt"
 
-	"github.com/multica-ai/multica/server/internal/errcode"
 	"github.com/multica-ai/multica/server/internal/mcp/mcptool"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -19,10 +20,14 @@ func (CreatePR) InputSchema() any {
 		"type":     "object",
 		"required": []string{"project_id", "branch", "title", "body"},
 		"properties": map[string]any{
-			"project_id": map[string]string{"type": "string", "format": "uuid"},
-			"branch":     map[string]string{"type": "string"},
-			"title":      map[string]string{"type": "string"},
-			"body":       map[string]string{"type": "string"},
+			"project_id":  map[string]string{"type": "string", "format": "uuid"},
+			"branch":      map[string]string{"type": "string"},
+			"title":       map[string]string{"type": "string"},
+			"body":        map[string]string{"type": "string"},
+			"base_branch": map[string]string{"type": "string"},
+			"provider":    map[string]string{"type": "string"},
+			"repo_url":    map[string]string{"type": "string"},
+			"secret_key":  map[string]string{"type": "string"},
 		},
 	}
 }
@@ -31,11 +36,63 @@ func (CreatePR) RuntimeModes() []string {
 	return []string{mcptool.RuntimeLocal, mcptool.RuntimeCloud}
 }
 
-func (CreatePR) Exec(_ context.Context, _ *db.Queries, _ mcptool.Context, _ map[string]any) (mcptool.Result, error) {
-	// TODO(plan4-followup): no existing handler — needs SCM provider integration.
+func (CreatePR) Exec(ctx context.Context, q *db.Queries, ws mcptool.Context, args map[string]any) (mcptool.Result, error) {
+	projectID, err := uuidArg(args, "project_id")
+	if err != nil {
+		return mcptool.Result{}, err
+	}
+	project, err := loadProjectForWorkspace(ctx, q, ws, projectID)
+	if err != nil {
+		if result, ok := accessErrorResult(err); ok {
+			return result, nil
+		}
+		return mcptool.Result{}, err
+	}
+
+	branch := stringArg(args, "branch")
+	title := stringArg(args, "title")
+	body := stringArg(args, "body")
+	if branch == "" || title == "" || body == "" {
+		return mcptool.Result{}, fmt.Errorf("branch, title, and body are required")
+	}
+
+	repoURL, err := selectRepoURL(ctx, q, ws.WorkspaceID, args)
+	if err != nil {
+		return mcptool.Result{}, err
+	}
+	provider := stringArg(args, "provider")
+	if provider == "" {
+		provider = inferProvider(repoURL)
+	}
+	secretKey := stringArg(args, "secret_key")
+	if secretKey == "" {
+		secretKey = provider + "_token"
+	}
+
+	token, err := service.NewSecretService(q).GetPlaintext(ctx, ws.WorkspaceID, secretKey)
+	if err != nil {
+		return mcptool.Result{}, err
+	}
+
+	baseBranch := stringArg(args, "base_branch")
+	if baseBranch == "" {
+		baseBranch = "main"
+	}
+
 	return mcptool.Result{
-		Stub:   true,
-		Note:   "no implementation; planned: handler/scm.go CreatePR",
-		Errors: []string{errcode.MCPToolNotAvailable.Code},
+		Stub: true,
+		Note: "SCM pull request API call is stubbed; workspace secret token was loaded",
+		Data: map[string]any{
+			"project_id":    projectID.String(),
+			"workspace_id":  uuidString(project.WorkspaceID),
+			"provider":      provider,
+			"repo_url":      repoURL,
+			"branch":        branch,
+			"base_branch":   baseBranch,
+			"title":         title,
+			"body":          body,
+			"secret_key":    secretKey,
+			"secret_loaded": token != "",
+		},
 	}, nil
 }

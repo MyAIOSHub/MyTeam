@@ -106,12 +106,6 @@ func issueToMap(i db.Issue) map[string]any {
 	return out
 }
 
-func uuidString(u pgtype.UUID) string {
-	if !u.Valid {
-		return ""
-	}
-	return uuid.UUID(u.Bytes).String()
-}
 
 func timestampString(t pgtype.Timestamptz) string {
 	if !t.Valid {

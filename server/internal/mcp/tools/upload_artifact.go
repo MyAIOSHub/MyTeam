@@ -64,9 +64,9 @@ func (UploadArtifact) Exec(ctx context.Context, q *db.Queries, ws mcptool.Contex
 		return mcptool.Result{}, err
 	}
 
-	artifactType, _ := stringArg(args, "artifact_type")
-	title, _ := stringArg(args, "title")
-	summary, _ := stringArg(args, "summary")
+	artifactType := stringArg(args, "artifact_type")
+	title := stringArg(args, "title")
+	summary := stringArg(args, "summary")
 
 	task, deny, err := ensureAgentOnTask(ctx, q, ws, taskID)
 	if err != nil {

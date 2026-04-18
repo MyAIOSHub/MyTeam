@@ -46,7 +46,7 @@ func (RequestApproval) Exec(ctx context.Context, q *db.Queries, ws mcptool.Conte
 	if err != nil {
 		return mcptool.Result{}, err
 	}
-	contextStr, _ := stringArg(args, "context")
+	contextStr := stringArg(args, "context")
 
 	task, deny, err := ensureAgentOnTask(ctx, q, ws, taskID)
 	if err != nil {
