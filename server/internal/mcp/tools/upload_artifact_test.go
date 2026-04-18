@@ -1,0 +1,151 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/multica-ai/multica/server/internal/mcp/mcptool"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+)
+
+func TestUploadArtifact_Headless(t *testing.T) {
+	q := testDB(t)
+	env := setupTaskEnv(t, q)
+	ctx := context.Background()
+
+	res, err := UploadArtifact{}.Exec(ctx, q, mcptool.Context{
+		WorkspaceID: pgxToUUID(t, env.WorkspaceID),
+		UserID:      pgxToUUID(t, env.OwnerID),
+		AgentID:     pgxToUUID(t, env.AgentID),
+		RuntimeMode: mcptool.RuntimeCloud,
+	}, map[string]any{
+		"task_id":       pgxToUUID(t, env.TaskID).String(),
+		"slot_id":       uuid.Nil.String(),
+		"execution_id":  uuid.Nil.String(),
+		"artifact_type": "report",
+		"title":         "Headless title",
+		"summary":       "summary",
+		"content":       map[string]any{"output": "ok"},
+	})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if len(res.Errors) > 0 {
+		t.Fatalf("unexpected errors: %v (note=%s)", res.Errors, res.Note)
+	}
+	data, ok := res.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map result, got %T", res.Data)
+	}
+	if data["artifact_type"] != "report" {
+		t.Errorf("artifact_type: want report, got %v", data["artifact_type"])
+	}
+	if _, ok := data["id"]; !ok {
+		t.Error("missing id in response")
+	}
+	if data["file_index_id"] != nil {
+		t.Errorf("headless artifact should not have file_index_id, got %v", data["file_index_id"])
+	}
+}
+
+func TestUploadArtifact_FileBacked(t *testing.T) {
+	q := testDB(t)
+	env := setupTaskEnv(t, q)
+	ctx := context.Background()
+
+	// Insert a file_index row so CreateWithFile has something to point at.
+	scopeJSON, _ := json.Marshal(map[string]any{"scope": "project"})
+	fi, err := q.CreateFileIndex(ctx, db.CreateFileIndexParams{
+		WorkspaceID:          env.WorkspaceID,
+		UploaderIdentityID:   env.OwnerID,
+		UploaderIdentityType: "member",
+		OwnerID:              env.OwnerID,
+		SourceType:           "project",
+		SourceID:             env.ProjectID,
+		FileName:             "design.pdf",
+		FileSize:             pgtype.Int8{Int64: 2048, Valid: true},
+		ContentType:          pgtype.Text{String: "application/pdf", Valid: true},
+		StoragePath:          pgtype.Text{String: "/tmp/design.pdf", Valid: true},
+		AccessScope:          scopeJSON,
+		ChannelID:            pgtype.UUID{},
+		ProjectID:            env.ProjectID,
+	})
+	if err != nil {
+		t.Fatalf("create file_index: %v", err)
+	}
+
+	res, err := UploadArtifact{}.Exec(ctx, q, mcptool.Context{
+		WorkspaceID: pgxToUUID(t, env.WorkspaceID),
+		UserID:      pgxToUUID(t, env.OwnerID),
+		AgentID:     pgxToUUID(t, env.AgentID),
+		RuntimeMode: mcptool.RuntimeCloud,
+	}, map[string]any{
+		"task_id":       pgxToUUID(t, env.TaskID).String(),
+		"slot_id":       uuid.Nil.String(),
+		"execution_id":  uuid.Nil.String(),
+		"artifact_type": "design",
+		"title":         "File-backed",
+		"summary":       "design v1",
+		"file":          pgxToUUID(t, fi.ID).String(),
+	})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if len(res.Errors) > 0 {
+		t.Fatalf("unexpected errors: %v (note=%s)", res.Errors, res.Note)
+	}
+	data, ok := res.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map result, got %T", res.Data)
+	}
+	if data["artifact_type"] != "design" {
+		t.Errorf("artifact_type: want design, got %v", data["artifact_type"])
+	}
+	if data["file_index_id"] != pgxToUUID(t, fi.ID).String() {
+		t.Errorf("file_index_id: want %s, got %v", pgxToUUID(t, fi.ID).String(), data["file_index_id"])
+	}
+}
+
+func TestUploadArtifact_DeniesUnrelatedAgent(t *testing.T) {
+	q := testDB(t)
+	env := setupTaskEnv(t, q)
+	ctx := context.Background()
+
+	// A different agent that is neither actual_agent_id nor primary_assignee_id
+	// of the task. Should be rejected with MCP_PERMISSION_DENIED.
+	otherAgent, err := q.CreatePersonalAgent(ctx, db.CreatePersonalAgentParams{
+		WorkspaceID: env.WorkspaceID,
+		Name:        "Outsider Agent",
+		Description: "should not have access",
+		RuntimeID:   env.RuntimeID,
+		OwnerID:     env.OwnerID,
+	})
+	if err != nil {
+		t.Fatalf("create other agent: %v", err)
+	}
+
+	res, err := UploadArtifact{}.Exec(ctx, q, mcptool.Context{
+		WorkspaceID: pgxToUUID(t, env.WorkspaceID),
+		UserID:      pgxToUUID(t, env.OwnerID),
+		AgentID:     pgxToUUID(t, otherAgent.ID),
+		RuntimeMode: mcptool.RuntimeCloud,
+	}, map[string]any{
+		"task_id":       pgxToUUID(t, env.TaskID).String(),
+		"slot_id":       uuid.Nil.String(),
+		"execution_id":  uuid.Nil.String(),
+		"artifact_type": "report",
+		"title":         "denied",
+		"summary":       "should fail",
+		"content":       map[string]any{"x": 1},
+	})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if len(res.Errors) == 0 || res.Errors[0] != "MCP_PERMISSION_DENIED" {
+		t.Fatalf("expected MCP_PERMISSION_DENIED, got errors=%v note=%s", res.Errors, res.Note)
+	}
+}
