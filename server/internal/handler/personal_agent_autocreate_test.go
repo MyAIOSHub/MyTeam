@@ -77,12 +77,21 @@ func TestVerifyCode_AutoCreatesPersonalAgent(t *testing.T) {
 	}
 
 	wsID := workspaces[0].ID
-	agent, err := testHandler.Queries.GetPersonalAgent(ctx, db.GetPersonalAgentParams{
-		WorkspaceID: wsID,
-		OwnerID:     user.ID,
-	})
+	// auto-provision is async (per Codex review) — poll up to 5s for the agent to materialize
+	var agent db.Agent
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		agent, err = testHandler.Queries.GetPersonalAgent(ctx, db.GetPersonalAgentParams{
+			WorkspaceID: wsID,
+			OwnerID:     user.ID,
+		})
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	if err != nil {
-		t.Fatalf("GetPersonalAgent (post verify-code): expected agent to exist, got: %v", err)
+		t.Fatalf("GetPersonalAgent (after 5s poll): expected agent to exist, got: %v", err)
 	}
 	if agent.Status != "idle" {
 		t.Fatalf("personal agent status: expected 'idle', got %q", agent.Status)

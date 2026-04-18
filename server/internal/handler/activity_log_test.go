@@ -33,7 +33,7 @@ func createTestProject(t *testing.T) string {
 	ctx := context.Background()
 	var projectID string
 	err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title, description, status, created_by)
+		INSERT INTO project (workspace_id, title, description, status, creator_owner_id)
 		VALUES ($1, 'activity-log test project', '', 'not_started', $2)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&projectID)

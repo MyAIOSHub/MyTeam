@@ -69,13 +69,22 @@ func TestCompleteTask_DeniesUnrelatedAgent(t *testing.T) {
 	env := setupTaskEnv(t, q)
 	ctx := context.Background()
 
-	// Create a separate agent with no relationship to the task.
+	// Create a separate agent (different owner — migration 062 added a
+	// (workspace_id, owner_id, agent_type='personal_agent') unique
+	// constraint, so we need a fresh user) with no relationship to the task.
+	otherUser, err := q.CreateUser(ctx, db.CreateUserParams{
+		Name:  "Outsider " + t.Name(),
+		Email: "outsider+" + uniqSuffix(t) + "@example.com",
+	})
+	if err != nil {
+		t.Fatalf("create outsider user: %v", err)
+	}
 	other, err := q.CreatePersonalAgent(ctx, db.CreatePersonalAgentParams{
 		WorkspaceID: env.WorkspaceID,
 		Name:        "Outsider",
 		Description: "no relation to task",
 		RuntimeID:   env.RuntimeID,
-		OwnerID:     env.OwnerID,
+		OwnerID:     otherUser.ID,
 	})
 	if err != nil {
 		t.Fatalf("create other agent: %v", err)

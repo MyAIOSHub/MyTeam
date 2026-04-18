@@ -116,13 +116,21 @@ func TestUploadArtifact_DeniesUnrelatedAgent(t *testing.T) {
 	ctx := context.Background()
 
 	// A different agent that is neither actual_agent_id nor primary_assignee_id
-	// of the task. Should be rejected with MCP_PERMISSION_DENIED.
+	// of the task. Different owner because migration 062 added a
+	// (workspace_id, owner_id, agent_type='personal_agent') unique constraint.
+	otherUser, err := q.CreateUser(ctx, db.CreateUserParams{
+		Name:  "Outsider " + t.Name(),
+		Email: "outsider+" + uniqSuffix(t) + "@example.com",
+	})
+	if err != nil {
+		t.Fatalf("create outsider user: %v", err)
+	}
 	otherAgent, err := q.CreatePersonalAgent(ctx, db.CreatePersonalAgentParams{
 		WorkspaceID: env.WorkspaceID,
 		Name:        "Outsider Agent",
 		Description: "should not have access",
 		RuntimeID:   env.RuntimeID,
-		OwnerID:     env.OwnerID,
+		OwnerID:     otherUser.ID,
 	})
 	if err != nil {
 		t.Fatalf("create other agent: %v", err)
