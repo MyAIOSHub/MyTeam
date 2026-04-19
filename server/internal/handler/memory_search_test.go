@@ -71,6 +71,12 @@ func (s *fakeIndexStore) DeleteByMemory(_ context.Context, memoryID uuid.UUID) e
 	s.chunks = kept
 	return nil
 }
+func (s *fakeIndexStore) ReplaceByMemory(ctx context.Context, memoryID uuid.UUID, chunks []memory.Chunk) error {
+	if err := s.DeleteByMemory(ctx, memoryID); err != nil {
+		return err
+	}
+	return s.Upsert(ctx, chunks)
+}
 
 // withMemoryIndexing swaps testHandler.Memory to a service WithIndexing
 // wired for the test, then restores the original on cleanup.

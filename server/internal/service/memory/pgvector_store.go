@@ -186,6 +186,77 @@ func (s *PgvectorStore) DeleteByMemory(ctx context.Context, memoryID uuid.UUID) 
 	return nil
 }
 
+// ReplaceByMemory does Delete + Insert in a single tx so re-promote
+// stays atomic. If any insert fails, the rollback restores the prior
+// chunks — search never sees a memory with zero indexed chunks. Issue
+// #65.
+func (s *PgvectorStore) ReplaceByMemory(ctx context.Context, memoryID uuid.UUID, chunks []Chunk) error {
+	for _, c := range chunks {
+		if c.MemoryID != uuid.Nil && c.MemoryID != memoryID {
+			return fmt.Errorf("chunk %s belongs to memory %s, not %s",
+				c.ID, c.MemoryID, memoryID)
+		}
+		if len(c.Embedding) != s.Dim {
+			return fmt.Errorf("%w: chunk %s has dim %d, want %d",
+				ErrDimMismatch, c.ID, len(c.Embedding), s.Dim)
+		}
+	}
+
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM memory_chunk WHERE memory_id = $1`, memoryID); err != nil {
+		return fmt.Errorf("delete prior chunks: %w", err)
+	}
+
+	// Look up workspace_id once; chunks all share memoryID by precondition.
+	var wsID uuid.UUID
+	if len(chunks) > 0 {
+		row := tx.QueryRow(ctx,
+			`SELECT workspace_id FROM memory_record WHERE id = $1`, memoryID)
+		var wsPg pgvecUUIDScan
+		if err := row.Scan(&wsPg); err != nil {
+			return fmt.Errorf("lookup memory %s: %w", memoryID, err)
+		}
+		wsID = uuid.UUID(wsPg)
+	}
+
+	for _, c := range chunks {
+		if c.ID == uuid.Nil {
+			c.ID = uuid.New()
+		}
+		if c.MemoryID == uuid.Nil {
+			c.MemoryID = memoryID
+		}
+		if c.Dim == 0 {
+			c.Dim = s.Dim
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO memory_chunk
+				(id, memory_id, workspace_id, byte_offset, byte_len,
+				 text, embedding, model, dim)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			ON CONFLICT (id) DO UPDATE SET
+				memory_id = EXCLUDED.memory_id,
+				workspace_id = EXCLUDED.workspace_id,
+				byte_offset = EXCLUDED.byte_offset,
+				byte_len = EXCLUDED.byte_len,
+				text = EXCLUDED.text,
+				embedding = EXCLUDED.embedding,
+				model = EXCLUDED.model,
+				dim = EXCLUDED.dim
+		`, c.ID, c.MemoryID, wsID, c.ByteOffset, c.ByteLen,
+			c.Text, pgvec.NewVector(c.Embedding), c.Model, c.Dim); err != nil {
+			return fmt.Errorf("insert chunk %s: %w", c.ID, err)
+		}
+	}
+	return tx.Commit(ctx)
+}
+
 // pgvecUUIDScan exists to give pgx a destination for the workspace_id
 // scan. uuid.UUID alone doesn't satisfy pgx.Scanner.
 type pgvecUUIDScan [16]byte

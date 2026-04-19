@@ -55,4 +55,11 @@ type Store interface {
 	// DeleteByMemory removes every chunk for a memory_id (cascade on
 	// memory deletion or re-index).
 	DeleteByMemory(ctx context.Context, memoryID uuid.UUID) error
+
+	// ReplaceByMemory atomically deletes existing chunks for memoryID and
+	// inserts the new ones in a single transaction. Solves the gap left
+	// by Delete+Upsert: if Upsert fails or the process crashes mid-write,
+	// the prior chunks stay in place instead of leaving the memory with
+	// zero searchable chunks. Issue #65.
+	ReplaceByMemory(ctx context.Context, memoryID uuid.UUID, chunks []Chunk) error
 }

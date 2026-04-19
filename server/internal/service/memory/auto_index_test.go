@@ -34,6 +34,7 @@ func (f *fakeEmbedder) Model() string { return f.model }
 type fakeStore struct {
 	upsertedChunks [][]Chunk
 	deletedMems    []uuid.UUID
+	replacedMems   []uuid.UUID
 }
 
 func (f *fakeStore) Upsert(_ context.Context, chunks []Chunk) error {
@@ -45,6 +46,11 @@ func (f *fakeStore) Search(_ context.Context, _ []float32, _ int, _ Filter) ([]H
 }
 func (f *fakeStore) DeleteByMemory(_ context.Context, id uuid.UUID) error {
 	f.deletedMems = append(f.deletedMems, id)
+	return nil
+}
+func (f *fakeStore) ReplaceByMemory(_ context.Context, id uuid.UUID, chunks []Chunk) error {
+	f.replacedMems = append(f.replacedMems, id)
+	f.upsertedChunks = append(f.upsertedChunks, chunks)
 	return nil
 }
 
@@ -88,8 +94,8 @@ func TestPromoteAutoIndexes(t *testing.T) {
 	if emb.calls != 1 {
 		t.Errorf("expected 1 embed call on Promote, got %d", emb.calls)
 	}
-	if len(store.deletedMems) != 1 || store.deletedMems[0] != mem.ID {
-		t.Errorf("expected DeleteByMemory(%s), got %#v", mem.ID, store.deletedMems)
+	if len(store.replacedMems) != 1 || store.replacedMems[0] != mem.ID {
+		t.Errorf("expected ReplaceByMemory(%s), got %#v", mem.ID, store.replacedMems)
 	}
 	if len(store.upsertedChunks) != 1 {
 		t.Fatalf("expected 1 Upsert batch, got %d", len(store.upsertedChunks))
@@ -117,8 +123,8 @@ func TestPromoteAutoIndexes(t *testing.T) {
 	if emb.calls != 2 {
 		t.Errorf("re-promote: want 2 embed calls total, got %d", emb.calls)
 	}
-	if len(store.deletedMems) != 2 {
-		t.Errorf("re-promote: want 2 DeleteByMemory calls, got %d", len(store.deletedMems))
+	if len(store.replacedMems) != 2 {
+		t.Errorf("re-promote: want 2 ReplaceByMemory calls, got %d", len(store.replacedMems))
 	}
 }
 

@@ -79,6 +79,12 @@ func (f *fakeStore) DeleteByMemory(_ context.Context, memoryID uuid.UUID) error 
 	f.chunks = kept
 	return nil
 }
+func (f *fakeStore) ReplaceByMemory(ctx context.Context, memoryID uuid.UUID, chunks []memory.Chunk) error {
+	if err := f.DeleteByMemory(ctx, memoryID); err != nil {
+		return err
+	}
+	return f.Upsert(ctx, chunks)
+}
 
 func TestMemorySearch_E2E_AppendPromoteSearch(t *testing.T) {
 	ctx := context.Background()

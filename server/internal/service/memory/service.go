@@ -228,11 +228,10 @@ func (s *Service) indexMemory(ctx context.Context, mem Memory) error {
 		chunks[i].Model = model
 		chunks[i].Dim = dim
 	}
-	if err := s.Store.DeleteByMemory(ctx, mem.ID); err != nil {
-		return fmt.Errorf("delete old chunks: %w", err)
-	}
-	if err := s.Store.Upsert(ctx, chunks); err != nil {
-		return fmt.Errorf("upsert: %w", err)
+	// Atomic: prior chunks survive if Insert fails — search never sees
+	// a confirmed memory with zero chunks. Issue #65.
+	if err := s.Store.ReplaceByMemory(ctx, mem.ID, chunks); err != nil {
+		return fmt.Errorf("replace chunks: %w", err)
 	}
 	return nil
 }
