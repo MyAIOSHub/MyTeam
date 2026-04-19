@@ -5,19 +5,18 @@ test.describe("Authentication", () => {
   test("login page renders correctly", async ({ page }) => {
     await page.goto("/login");
 
-    await expect(page.locator("h1")).toContainText("Multica");
-    await expect(page.locator('input[placeholder="Email"]')).toBeVisible();
-    await expect(page.locator('input[placeholder="Name"]')).toBeVisible();
+    await expect(page.getByText("My Team")).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "邮箱" })).toBeVisible();
     await expect(page.locator('button[type="submit"]')).toContainText(
-      "Sign in",
+      "继续",
     );
   });
 
-  test("login and redirect to /issues", async ({ page }) => {
+  test("login and redirect to /projects", async ({ page }) => {
     await loginAsDefault(page);
 
-    await expect(page).toHaveURL(/\/issues/);
-    await expect(page.locator("text=All Issues")).toBeVisible();
+    await expect(page).toHaveURL(/\/projects/);
+    await expect(page.getByRole("button", { name: "创建项目" })).toBeVisible();
   });
 
   test("unauthenticated user is redirected to /login", async ({ page }) => {
@@ -27,7 +26,7 @@ test.describe("Authentication", () => {
       localStorage.removeItem("multica_workspace_id");
     });
 
-    await page.goto("/issues");
+    await page.goto("/projects");
     await page.waitForURL("**/login", { timeout: 10000 });
   });
 
@@ -37,8 +36,7 @@ test.describe("Authentication", () => {
     // Open the workspace dropdown menu
     await openWorkspaceMenu(page);
 
-    // Click Sign out
-    await page.locator("text=Sign out").click();
+    await page.getByText("退出登录").click();
 
     await page.waitForURL("**/login", { timeout: 10000 });
     await expect(page).toHaveURL(/\/login/);
