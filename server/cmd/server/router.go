@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/service/memory"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/pkg/agent_runner"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -54,7 +55,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	emailSvc := service.NewEmailService()
 	s3 := storage.NewS3StorageFromEnv()
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
-	h := handler.New(queries, pool, hub, bus, emailSvc, s3, cfSigner)
+	memorySvc := memory.NewService(queries).WithBus(bus)
+	h := handler.New(queries, pool, hub, bus, emailSvc, s3, cfSigner, memorySvc)
 	// Single Claude Agent SDK runner shared across every cloud-mode invocation
 	// path so a system / personal / project agent's cloud_llm_config controls
 	// the same SDK installation regardless of who triggered it.
@@ -253,6 +255,14 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 
 			// Search
 			r.Get("/api/search", h.Search)
+
+			// Memories
+			r.Route("/api/memories", func(r chi.Router) {
+				r.Post("/", h.CreateMemory)
+				r.Get("/", h.ListMemories)
+				r.Post("/search", h.SearchMemories)
+				r.Post("/{id}/promote", h.PromoteMemory)
+			})
 
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
