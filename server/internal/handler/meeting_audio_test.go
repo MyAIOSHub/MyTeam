@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/middleware"
 )
 
 // TestIsAllowedAudioMIME — whitelist gate for the audio upload endpoint.
@@ -59,7 +61,9 @@ func TestUploadMeetingAudio_RejectsBadMIME(t *testing.T) {
 	req = httptest.NewRequest("POST", "/api/threads/"+fx.threadID+"/meeting/audio", body)
 	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-User-ID", testUserID)
-	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	// resolveWorkspaceID reads only the middleware-injected context after
+	// the #20 fix; mirror that here since this request bypasses newRequest.
+	req = req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, testMember))
 	req = withURLParam(req, "threadID", fx.threadID)
 	testHandler.UploadMeetingAudio(w, req)
 	if w.Code != http.StatusUnsupportedMediaType {

@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -23,6 +24,7 @@ var testHandler *Handler
 var testPool *pgxpool.Pool
 var testUserID string
 var testWorkspaceID string
+var testMember db.Member
 
 const (
 	handlerTestEmail         = "handler-test@multica.ai"
@@ -59,6 +61,16 @@ func TestMain(m *testing.M) {
 	testUserID, testWorkspaceID, err = setupHandlerTestFixture(ctx, pool)
 	if err != nil {
 		fmt.Printf("Failed to set up handler test fixture: %v\n", err)
+		pool.Close()
+		os.Exit(1)
+	}
+
+	testMember, err = queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      parseUUID(testUserID),
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		fmt.Printf("Failed to load test member: %v\n", err)
 		pool.Close()
 		os.Exit(1)
 	}
@@ -147,8 +159,10 @@ func newRequest(method, path string, body any) *http.Request {
 	req := httptest.NewRequest(method, path, &buf)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-ID", testUserID)
-	req.Header.Set("X-Workspace-ID", testWorkspaceID)
-	return req
+	// resolveWorkspaceID now reads only the middleware-injected context, so
+	// tests must inject the same context the workspace middleware would
+	// produce in production.
+	return req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, testMember))
 }
 
 func withURLParam(req *http.Request, key, value string) *http.Request {

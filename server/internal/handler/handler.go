@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -195,16 +194,16 @@ func requireUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return userID, true
 }
 
+// resolveWorkspaceID returns the workspace ID from the middleware-validated
+// request context. Query-param and X-Workspace-ID-header fallbacks were
+// removed: both sources accepted user-supplied values without a membership
+// check, so a route that accidentally bypassed RequireWorkspaceMember would
+// trust them blindly. All production workspace routes run through the
+// middleware, which validates membership before injecting the workspace ID
+// into the context (see internal/middleware/workspace.go buildMiddleware).
+// Tests must inject the context explicitly via middleware.SetMemberContext.
 func resolveWorkspaceID(r *http.Request) string {
-	// Prefer context value set by workspace middleware.
-	if id := middleware.WorkspaceIDFromContext(r.Context()); id != "" {
-		return id
-	}
-	workspaceID := r.URL.Query().Get("workspace_id")
-	if workspaceID != "" {
-		return workspaceID
-	}
-	return r.Header.Get("X-Workspace-ID")
+	return middleware.WorkspaceIDFromContext(r.Context())
 }
 
 // ctxMember returns the workspace member from context (set by workspace middleware).
@@ -217,12 +216,13 @@ func ctxWorkspaceID(ctx context.Context) string {
 	return middleware.WorkspaceIDFromContext(ctx)
 }
 
-// workspaceIDFromURL returns the workspace ID from context (preferred) or chi URL param (fallback).
-func workspaceIDFromURL(r *http.Request, param string) string {
-	if id := middleware.WorkspaceIDFromContext(r.Context()); id != "" {
-		return id
-	}
-	return chi.URLParam(r, param)
+// workspaceIDFromURL returns the workspace ID from the middleware-validated
+// request context. The chi URL-param fallback was removed: the URL param is
+// user-controlled and only safe after RequireWorkspaceMemberFromURL has run
+// and written the validated workspace ID into the context. The param argument
+// is retained for call-site ergonomics but is no longer read.
+func workspaceIDFromURL(r *http.Request, _ string) string {
+	return middleware.WorkspaceIDFromContext(r.Context())
 }
 
 // workspaceMember returns the member from middleware context, or falls back to a DB

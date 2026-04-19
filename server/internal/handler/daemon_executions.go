@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -76,7 +77,10 @@ func (h *Handler) ClaimExecution(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req claimExecutionRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
 
 	// Default working_dir from the runtime row when the daemon doesn't
 	// supply one (e.g. cloud executor poll). Look up the runtime so we can
@@ -84,7 +88,7 @@ func (h *Handler) ClaimExecution(w http.ResponseWriter, r *http.Request) {
 	mode := "local"
 	if req.WorkingDir == "" || req.DaemonID == "" || mode == "" {
 		rt, rtErr := h.Queries.GetAgentRuntime(r.Context(), pgUUIDFrom(runtimeID))
-		if rtErr == nil {
+		if rtErr == nil && rt.ID.Valid {
 			if req.WorkingDir == "" && rt.WorkingDir != "" {
 				req.WorkingDir = rt.WorkingDir
 			}
@@ -97,11 +101,17 @@ func (h *Handler) ClaimExecution(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	contextRef, _ := json.Marshal(map[string]any{
+	contextRef, err := json.Marshal(map[string]any{
 		"mode":        mode,
 		"working_dir": req.WorkingDir,
 		"daemon_id":   req.DaemonID,
 	})
+	if err != nil {
+		slog.Warn("execution claim context_ref encode failed",
+			"runtime_id", runtimeID, "err", err)
+		writeError(w, http.StatusInternalServerError, "encode failed")
+		return
+	}
 
 	e, err := h.Queries.ClaimExecution(r.Context(), db.ClaimExecutionParams{
 		RuntimeID:  pgUUIDFrom(runtimeID),
@@ -148,11 +158,20 @@ func (h *Handler) StartExecution(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req startExecutionRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
 
 	var ctxRefJSON []byte
 	if req.ContextRef != nil {
-		ctxRefJSON, _ = json.Marshal(req.ContextRef)
+		ctxRefJSON, err = json.Marshal(req.ContextRef)
+		if err != nil {
+			slog.Warn("execution start context_ref encode failed",
+				"execution_id", id, "err", err)
+			writeError(w, http.StatusInternalServerError, "encode failed")
+			return
+		}
 	}
 
 	if err := h.Queries.StartExecution(r.Context(), db.StartExecutionParams{
@@ -187,7 +206,10 @@ func (h *Handler) ProgressExecution(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req progressExecutionRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
 
 	h.publishExecutionEvent(r, "execution:progress", id, map[string]any{
 		"execution_id": id.String(),
@@ -305,7 +327,10 @@ func (h *Handler) FailExecution(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req failExecutionRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
 	if req.Status == "" {
 		req.Status = "failed"
 	}
@@ -368,7 +393,10 @@ func (h *Handler) StreamExecutionMessage(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req executionMessageRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
 
 	h.publishExecutionEvent(r, "execution:message", id, map[string]any{
 		"execution_id": id.String(),
