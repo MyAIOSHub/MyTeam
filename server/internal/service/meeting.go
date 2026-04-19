@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 	"unicode/utf8"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/service/asr"
 	"github.com/multica-ai/multica/server/internal/service/memory"
+	"github.com/multica-ai/multica/server/internal/storage"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -92,7 +94,8 @@ type MeetingService struct {
 	Tx      TxStarter
 	Secrets SecretGetter
 	ASR     asr.Client
-	Memory  *memory.Service // optional; nil disables dual-write to memory_record
+	Memory  *memory.Service  // optional; nil disables dual-write to memory_record
+	Storage storage.Storage  // optional; required by UploadAudio + auto-presign in Summarize
 }
 
 func NewMeetingService(q *db.Queries, tx TxStarter, secrets SecretGetter, asrClient asr.Client) *MeetingService {
@@ -103,6 +106,13 @@ func NewMeetingService(q *db.Queries, tx TxStarter, secrets SecretGetter, asrCli
 // + the meeting summary itself. Pass nil to disable (default).
 func (s *MeetingService) WithMemory(m *memory.Service) *MeetingService {
 	s.Memory = m
+	return s
+}
+
+// WithStorage enables UploadAudio + auto-presign in Summarize. Storage
+// is per-workspace; caller resolves via storage.Factory.NewFromWorkspace.
+func (s *MeetingService) WithStorage(st storage.Storage) *MeetingService {
+	s.Storage = st
 	return s
 }
 
@@ -137,9 +147,63 @@ func (s *MeetingService) StartMeeting(ctx context.Context, threadID uuid.UUID, a
 	return meta, nil
 }
 
+// UploadAudio uploads the recording bytes to the workspace's Storage
+// backend, creates a file_index row, then records the id on the
+// meeting (status → transcribing). Returns the file_index id so the
+// caller can verify or pass it back as audioURL override later.
+//
+// Requires Storage to be wired (WithStorage). Returns an error
+// otherwise — non-storage callers must use AttachAudio directly with
+// a pre-existing file_index id.
+func (s *MeetingService) UploadAudio(ctx context.Context, threadID, ownerID uuid.UUID, body io.Reader, filename, contentType string) (MeetingMeta, uuid.UUID, error) {
+	if s.Storage == nil {
+		return MeetingMeta{}, uuid.Nil, errors.New("meeting: Storage not wired (use WithStorage or AttachAudio)")
+	}
+	meta, thread, err := s.loadMeta(ctx, threadID)
+	if err != nil {
+		return MeetingMeta{}, uuid.Nil, err
+	}
+	if meta.Kind != "meeting" {
+		return MeetingMeta{}, uuid.Nil, ErrNotMeeting
+	}
+	wsID := uuid.UUID(thread.WorkspaceID.Bytes)
+	key := fmt.Sprintf("meetings/%s/%s-%s",
+		wsID.String(), threadID.String(), uuid.NewString()[:8])
+	if filename != "" {
+		key += "-" + filename
+	}
+	storagePath, err := s.Storage.Put(ctx, key, body, contentType, filename)
+	if err != nil {
+		return MeetingMeta{}, uuid.Nil, fmt.Errorf("storage put: %w", err)
+	}
+	row, err := s.Q.CreateFileIndex(ctx, db.CreateFileIndexParams{
+		WorkspaceID:          thread.WorkspaceID,
+		UploaderIdentityID:   pgUUIDFromUUID(ownerID),
+		UploaderIdentityType: "member",
+		OwnerID:              pgUUIDFromUUID(ownerID),
+		SourceType:           "thread",
+		SourceID:             thread.ID,
+		FileName:             filename,
+		FileSize:             pgtype.Int8{Valid: true}, // size unknown post-stream; ok for MVP
+		ContentType:          pgtype.Text{String: contentType, Valid: contentType != ""},
+		StoragePath:          pgtype.Text{String: storagePath, Valid: true},
+		AccessScope:          []byte(`{"scope":"channel"}`),
+		ChannelID:            thread.ChannelID,
+	})
+	if err != nil {
+		return MeetingMeta{}, uuid.Nil, fmt.Errorf("create file_index: %w", err)
+	}
+	fileID := uuid.UUID(row.ID.Bytes)
+	updated, err := s.AttachAudio(ctx, threadID, fileID)
+	if err != nil {
+		return MeetingMeta{}, fileID, err
+	}
+	return updated, fileID, nil
+}
+
 // AttachAudio records the file_index id of the meeting recording and
 // flips status to transcribing. Caller is responsible for the actual
-// upload (handler/file_index.go path).
+// upload (handler/file_index.go path or UploadAudio).
 func (s *MeetingService) AttachAudio(ctx context.Context, threadID, fileIndexID uuid.UUID) (MeetingMeta, error) {
 	meta, _, err := s.loadMeta(ctx, threadID)
 	if err != nil {
@@ -169,6 +233,28 @@ func (s *MeetingService) Summarize(ctx context.Context, threadID uuid.UUID, audi
 	}
 	if meta.AudioFileID == "" && audioURL == "" {
 		return asr.SummaryBundle{}, ErrAudioMissing
+	}
+
+	// Auto-presign the attached audio when caller didn't override.
+	// Doubao 妙记 fetches the URL server-side, so it must reach our
+	// bucket — presigned GET is the safe path that doesn't expose
+	// our keys. 30-min TTL > typical poll wall clock.
+	if audioURL == "" && meta.AudioFileID != "" {
+		if s.Storage == nil {
+			return asr.SummaryBundle{}, errors.New("meeting: Storage not wired; cannot auto-presign audio_file_id")
+		}
+		fileID, err := uuid.Parse(meta.AudioFileID)
+		if err != nil {
+			return asr.SummaryBundle{}, fmt.Errorf("parse audio_file_id: %w", err)
+		}
+		fi, err := s.Q.GetFileIndex(ctx, pgUUIDFromUUID(fileID))
+		if err != nil {
+			return asr.SummaryBundle{}, fmt.Errorf("load file_index %s: %w", fileID, err)
+		}
+		audioURL, err = s.Storage.Presign(ctx, fi.StoragePath.String, 30*time.Minute)
+		if err != nil {
+			return asr.SummaryBundle{}, fmt.Errorf("presign audio: %w", err)
+		}
 	}
 
 	creds, err := s.loadCredentials(ctx, uuid.UUID(thread.WorkspaceID.Bytes))
