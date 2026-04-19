@@ -105,32 +105,52 @@ func (q *Queries) GetProjectVersion(ctx context.Context, id pgtype.UUID) (Projec
 }
 
 const listProjectVersions = `-- name: ListProjectVersions :many
-SELECT id, project_id, version, title, description, created_by, created_at, parent_version_id, version_number, branch_name, fork_reason, version_status, context_imports FROM project_version WHERE project_id = $1 ORDER BY version_number DESC
+SELECT
+    id,
+    project_id,
+    parent_version_id,
+    version_number,
+    branch_name,
+    fork_reason,
+    version_status,
+    created_by,
+    created_at
+FROM project_version
+WHERE project_id = $1
+ORDER BY version_number DESC
 `
 
-func (q *Queries) ListProjectVersions(ctx context.Context, projectID pgtype.UUID) ([]ProjectVersion, error) {
+type ListProjectVersionsRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	ProjectID       pgtype.UUID        `json:"project_id"`
+	ParentVersionID pgtype.UUID        `json:"parent_version_id"`
+	VersionNumber   int32              `json:"version_number"`
+	BranchName      pgtype.Text        `json:"branch_name"`
+	ForkReason      pgtype.Text        `json:"fork_reason"`
+	VersionStatus   string             `json:"version_status"`
+	CreatedBy       pgtype.UUID        `json:"created_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListProjectVersions(ctx context.Context, projectID pgtype.UUID) ([]ListProjectVersionsRow, error) {
 	rows, err := q.db.Query(ctx, listProjectVersions, projectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ProjectVersion{}
+	items := []ListProjectVersionsRow{}
 	for rows.Next() {
-		var i ProjectVersion
+		var i ListProjectVersionsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProjectID,
-			&i.Version,
-			&i.Title,
-			&i.Description,
-			&i.CreatedBy,
-			&i.CreatedAt,
 			&i.ParentVersionID,
 			&i.VersionNumber,
 			&i.BranchName,
 			&i.ForkReason,
 			&i.VersionStatus,
-			&i.ContextImports,
+			&i.CreatedBy,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
