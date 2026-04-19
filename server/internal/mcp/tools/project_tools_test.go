@@ -613,7 +613,7 @@ func fileIndexValues(f db.FileIndex) []any {
 		f.ID, f.WorkspaceID, f.UploaderIdentityID, f.UploaderIdentityType,
 		f.OwnerID, f.SourceType, f.SourceID, f.FileName, f.FileSize,
 		f.ContentType, f.StoragePath, f.AccessScope, f.ChannelID, f.ProjectID,
-		f.CreatedAt,
+		f.CreatedAt, f.Backend,
 	}
 }
 
