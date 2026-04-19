@@ -29,6 +29,11 @@ func init() {
 		tools.CreatePR{},
 		tools.CheckoutRepo{},
 		tools.LocalFileRead{},
+		// Memory MCP tools (Phase G).
+		tools.MemorySearch{},
+		tools.MemoryAppend{},
+		tools.MemoryPromote{},
+		tools.MemoryList{},
 	} {
 		if _, dup := Registry[t.Name()]; dup {
 			panic(fmt.Sprintf("mcp: duplicate tool name %q", t.Name()))

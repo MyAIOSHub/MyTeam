@@ -2,9 +2,10 @@ package mcp
 
 import "testing"
 
-func TestRegistryHas17Tools(t *testing.T) {
-	if len(Registry) != 17 {
-		t.Errorf("expected 17 tools, got %d", len(Registry))
+func TestRegistryHas21Tools(t *testing.T) {
+	// 17 original + 4 memory tools (Phase G).
+	if len(Registry) != 21 {
+		t.Errorf("expected 21 tools, got %d", len(Registry))
 	}
 }
 
@@ -25,6 +26,8 @@ func TestGetReturnsRegistered(t *testing.T) {
 		"list_assigned_projects", "get_project", "search_project_context", "list_project_files",
 		"download_attachment", "upload_artifact", "complete_task", "request_approval",
 		"read_file", "apply_patch", "create_pr", "checkout_repo", "local_file_read",
+		// Phase G memory tools.
+		"memory_search", "memory_append", "memory_promote", "memory_list",
 	}
 	for _, name := range cases {
 		if Get(name) == nil {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/service/memory"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -46,6 +47,11 @@ type Context struct {
 	// event publish, on_comment trigger, mention enqueue) and logs a warning.
 	// Production callers must always set this.
 	Comments *service.CommentService
+
+	// Memory is the shared memory.Service (Append/Promote/List/Search).
+	// Production wires it with WithIndexing so Promote auto-chunks +
+	// embeds + upserts. When nil, memory_* tools refuse to run.
+	Memory *memory.Service
 }
 
 // Result is the JSON-serializable response from a tool execution.

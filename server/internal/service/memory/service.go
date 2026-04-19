@@ -11,11 +11,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/service/embed"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -26,13 +28,34 @@ var ErrInvalidRaw = errors.New("memory: invalid raw reference")
 // ErrNotFound signals memory_record row missing.
 var ErrNotFound = errors.New("memory: record not found")
 
-// Service is the relational side of memory persistence. Vector ops go
-// through Store (Phase 3); this service only touches memory_record.
+// Service is the relational side of memory persistence. When Chunker +
+// Embedder + Store are wired (WithIndexing), Promote also chunks the
+// confirmed Body, embeds, and upserts into the vector store. All three
+// must be wired together; nil any one disables auto-indexing.
 type Service struct {
-	Q *db.Queries
+	Q        *db.Queries
+	Chunker  Chunker
+	Embedder embed.Embedder
+	Store    Store
 }
 
 func NewService(q *db.Queries) *Service { return &Service{Q: q} }
+
+// WithIndexing enables auto-chunk + embed + upsert on Promote. Pass
+// any nil to disable. Chunker chooses how to split; Embedder turns
+// chunks into vectors; Store persists them. Phase 3 supplies the
+// concrete impls.
+func (s *Service) WithIndexing(c Chunker, e embed.Embedder, st Store) *Service {
+	s.Chunker = c
+	s.Embedder = e
+	s.Store = st
+	return s
+}
+
+// indexingWired returns true when all 3 dependencies are present.
+func (s *Service) indexingWired() bool {
+	return s.Chunker != nil && s.Embedder != nil && s.Store != nil
+}
 
 // AppendInput collapses caller args. ID is allocated by the DB.
 type AppendInput struct {
@@ -93,6 +116,13 @@ func (s *Service) Append(ctx context.Context, in AppendInput) (Memory, error) {
 // Promote moves status from candidate → confirmed. Bumps version.
 // Idempotent: re-promoting a confirmed row keeps it confirmed (just
 // bumps version + updated_at).
+//
+// Auto-indexing: when WithIndexing was wired, Promote also chunks the
+// memory's Summary+Body, embeds each chunk, and upserts into Store.
+// Existing chunks for this memory_id are deleted first so re-promote
+// is idempotent (e.g. after a Body edit). Indexing failures log a
+// warning but do NOT fail the promote — the memory is confirmed
+// regardless; index can be rebuilt by a follow-up call.
 func (s *Service) Promote(ctx context.Context, id uuid.UUID) (Memory, error) {
 	row, err := s.Q.PromoteMemoryRecord(ctx, pgUUID(id))
 	if err != nil {
@@ -101,7 +131,62 @@ func (s *Service) Promote(ctx context.Context, id uuid.UUID) (Memory, error) {
 		}
 		return Memory{}, fmt.Errorf("promote: %w", err)
 	}
-	return rowToMemory(row), nil
+	mem := rowToMemory(row)
+
+	if s.indexingWired() {
+		if err := s.indexMemory(ctx, mem); err != nil {
+			// Warn-only — promote already committed; caller still
+			// gets the confirmed Memory back.
+			slog.Warn("memory: auto-index on promote failed",
+				"memory_id", mem.ID, "err", err)
+		}
+	}
+	return mem, nil
+}
+
+// indexMemory chunks Summary+Body, embeds, and upserts. Replaces any
+// existing chunks under this memory_id so re-promote is safe.
+func (s *Service) indexMemory(ctx context.Context, mem Memory) error {
+	source := mem.Summary
+	if mem.Body != "" {
+		if source != "" {
+			source += "\n\n"
+		}
+		source += mem.Body
+	}
+	if source == "" {
+		return nil // nothing to index
+	}
+	chunks := s.Chunker.Split(source)
+	if len(chunks) == 0 {
+		return nil
+	}
+	texts := make([]string, len(chunks))
+	for i, c := range chunks {
+		texts[i] = c.Text
+	}
+	vecs, err := s.Embedder.Embed(ctx, texts)
+	if err != nil {
+		return fmt.Errorf("embed: %w", err)
+	}
+	if len(vecs) != len(chunks) {
+		return fmt.Errorf("embedder returned %d vectors, want %d", len(vecs), len(chunks))
+	}
+	model := s.Embedder.Model()
+	dim := s.Embedder.Dim()
+	for i := range chunks {
+		chunks[i].MemoryID = mem.ID
+		chunks[i].Embedding = vecs[i]
+		chunks[i].Model = model
+		chunks[i].Dim = dim
+	}
+	if err := s.Store.DeleteByMemory(ctx, mem.ID); err != nil {
+		return fmt.Errorf("delete old chunks: %w", err)
+	}
+	if err := s.Store.Upsert(ctx, chunks); err != nil {
+		return fmt.Errorf("upsert: %w", err)
+	}
+	return nil
 }
 
 // Archive moves status to archived (read-only). Reverse-able only by
@@ -165,6 +250,44 @@ func (s *Service) GetByRaw(ctx context.Context, ref RawRef) ([]Memory, error) {
 	}
 	return out, nil
 }
+
+// SearchInput collapses caller args for semantic search.
+type SearchInput struct {
+	WorkspaceID uuid.UUID
+	Query       string
+	TopK        int
+	Types       []MemoryType
+	Scopes      []MemoryScope
+	StatusOnly  []MemoryStatus
+}
+
+// Search runs a semantic similarity query: embed the query → vector
+// Store.Search → return Hits. Requires WithIndexing wired (else
+// returns ErrIndexingNotWired).
+func (s *Service) Search(ctx context.Context, in SearchInput) ([]Hit, error) {
+	if !s.indexingWired() {
+		return nil, ErrIndexingNotWired
+	}
+	if in.Query == "" {
+		return nil, fmt.Errorf("memory.Search: query required")
+	}
+	vecs, err := s.Embedder.Embed(ctx, []string{in.Query})
+	if err != nil {
+		return nil, fmt.Errorf("embed query: %w", err)
+	}
+	if len(vecs) == 0 {
+		return nil, fmt.Errorf("embedder returned no vector")
+	}
+	return s.Store.Search(ctx, vecs[0], in.TopK, Filter{
+		WorkspaceID: in.WorkspaceID,
+		Types:       in.Types,
+		Scopes:      in.Scopes,
+		StatusOnly:  in.StatusOnly,
+	})
+}
+
+// ErrIndexingNotWired signals Chunker/Embedder/Store missing.
+var ErrIndexingNotWired = errors.New("memory: indexing not wired (call WithIndexing)")
 
 // Get returns a single record by id.
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (Memory, error) {
