@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/service/asr"
 	"github.com/multica-ai/multica/server/internal/service/memory"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -56,6 +57,15 @@ type Handler struct {
 	Quota             *service.QuotaService
 	IdentityGenerator *service.IdentityGeneratorService
 	Activity          *service.ActivityWriter
+
+	// Meeting deps — set by router after New(). Without them, /api/threads/
+	// {id}/meeting/* endpoints return 503. Each request constructs a fresh
+	// MeetingService bound to the workspace's storage backend. Secrets is
+	// an interface so tests can inject canned credentials without round-
+	// tripping through workspace_secret encryption.
+	Secrets        service.SecretGetter
+	ASR            asr.Client
+	StorageFactory *storage.Factory
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, s3 *storage.S3Storage, cfSigner *auth.CloudFrontSigner, memorySvc ...*memory.Service) *Handler {

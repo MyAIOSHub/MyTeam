@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/service/asr"
 	"github.com/multica-ai/multica/server/internal/service/embed"
 	"github.com/multica-ai/multica/server/internal/service/memory"
 	"github.com/multica-ai/multica/server/internal/storage"
@@ -70,6 +71,16 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		memorySvc = memorySvc.WithIndexing(memory.NewMarkdownChunker(), embedder, store)
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, s3, cfSigner, memorySvc)
+	// Meeting deps — Secrets+Storage always available; ASR client wired
+	// when env config present (NewMiaojiClient has no required env, so
+	// always wire). Endpoints return 503 only if Secrets/ASR are nil.
+	secrets := service.NewSecretService(queries)
+	h.Secrets = secrets
+	h.ASR = asr.NewMiaojiClient()
+	h.StorageFactory = &storage.Factory{
+		Secrets:  secrets,
+		Fallback: storage.NewS3Adapter(s3),
+	}
 	// Single Claude Agent SDK runner shared across every cloud-mode invocation
 	// path so a system / personal / project agent's cloud_llm_config controls
 	// the same SDK installation regardless of who triggered it.
@@ -422,6 +433,23 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Get("/context-items", h.ListThreadContextItems)
 				r.Post("/context-items", h.CreateThreadContextItem)
 				r.Delete("/context-items/{itemID}", h.DeleteThreadContextItem)
+
+				// Meeting lifecycle. handler/meeting.go enforces
+				// thread.workspace_id == request workspace + member check.
+				r.Route("/meeting", func(r chi.Router) {
+					r.Post("/start", h.StartMeeting)
+					r.Post("/audio", h.UploadMeetingAudio)
+					r.Post("/summarize", h.SummarizeMeeting)
+					r.Get("/action-items", h.ListMeetingActionItems)
+				})
+			})
+
+			// Action items live outside the thread route because the
+			// approve/reject ops only need the item id; handler resolves
+			// the parent thread + workspace from the row itself.
+			r.Route("/api/action-items/{itemID}", func(r chi.Router) {
+				r.Post("/approve", h.ApproveActionItem)
+				r.Post("/reject", h.RejectActionItem)
 			})
 
 			// Merge requests
