@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { useWorkspaceManagement, useWorkspaceStore } from "@/features/workspace";
+import { getSettingsErrorMessage } from "./settings-error";
 
 export function WorkspaceTab() {
   const { workspace, canManageWorkspace, isOwner, saveWorkspace } = useWorkspaceManagement();
@@ -56,7 +57,7 @@ export function WorkspaceTab() {
       });
       toast.success("工作区设置已保存");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "保存工作区设置失败");
+      toast.error(getSettingsErrorMessage(e, "保存工作区设置失败"));
     } finally {
       setSaving(false);
     }
@@ -73,7 +74,7 @@ export function WorkspaceTab() {
         try {
           await leaveWorkspace(workspace.id);
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : "离开工作区失败");
+          toast.error(getSettingsErrorMessage(e, "离开工作区失败"));
         } finally {
           setActionId(null);
         }
@@ -94,7 +95,7 @@ export function WorkspaceTab() {
       await deleteWorkspace(workspace.id);
       setDeleteConfirmOpen(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "删除工作区失败");
+      toast.error(getSettingsErrorMessage(e, "删除工作区失败"));
     } finally {
       setActionId(null);
     }

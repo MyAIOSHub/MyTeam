@@ -26,6 +26,13 @@ const (
 	slaWarningAfter  = 600 * time.Second // T+600: warning inbox to owner.
 	slaCriticalAfter = 900 * time.Second // T+900: critical inbox to owner.
 
+	// mediationMessageTimeout bounds per-message event handling, including any
+	// downstream auto-reply work started from the subscriber callback.
+	mediationMessageTimeout = 2 * time.Minute
+
+	// mediationSLATickTimeout bounds one SLA scan / escalation pass.
+	mediationSLATickTimeout = 30 * time.Second
+
 	// agentChainLimit caps the number of consecutive agent->agent replies in
 	// a thread before MediationService refuses further auto-responses.
 	agentChainLimit = 3
@@ -101,22 +108,45 @@ type MediationService struct {
 	EventBus  *events.Bus
 	AutoReply *AutoReplyService
 	DB        *pgxpool.Pool
+
+	lifecycleCtx    context.Context
+	lifecycleCancel context.CancelFunc
 }
 
 // NewMediationService creates a new MediationService.
 func NewMediationService(q *db.Queries, hub *realtime.Hub, bus *events.Bus, autoReply *AutoReplyService, pool *pgxpool.Pool) *MediationService {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &MediationService{
-		Queries:   q,
-		Hub:       hub,
-		EventBus:  bus,
-		AutoReply: autoReply,
-		DB:        pool,
+		Queries:         q,
+		Hub:             hub,
+		EventBus:        bus,
+		AutoReply:       autoReply,
+		DB:              pool,
+		lifecycleCtx:    ctx,
+		lifecycleCancel: cancel,
 	}
+}
+
+func (s *MediationService) rootContext() context.Context {
+	if s == nil || s.lifecycleCtx == nil {
+		return context.Background()
+	}
+	return s.lifecycleCtx
+}
+
+func mediationTimeoutContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(parent, timeout)
 }
 
 // Start subscribes to message:created events and runs mediation logic.
 func (s *MediationService) Start() {
-	ctx := context.Background()
+	if s.lifecycleCtx == nil {
+		s.lifecycleCtx, s.lifecycleCancel = context.WithCancel(context.Background())
+	}
+	ctx := s.rootContext()
 	s.EventBus.Subscribe(protocol.EventMessageCreated, func(e events.Event) {
 		go s.handleMessageCreated(e)
 	})
@@ -129,7 +159,9 @@ func (s *MediationService) Start() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				s.processSLATiers(ctx)
+				tickCtx, cancel := mediationTimeoutContext(ctx, mediationSLATickTimeout)
+				s.processSLATiers(tickCtx)
+				cancel()
 			}
 		}
 	}()
@@ -153,7 +185,8 @@ func (s *MediationService) handleMessageCreated(e events.Event) {
 		return // Not a channel message — skip mediation entirely.
 	}
 
-	ctx := context.Background()
+	ctx, cancel := mediationTimeoutContext(s.rootContext(), mediationMessageTimeout)
+	defer cancel()
 
 	// Track reply slots based on sender type.
 	s.trackReplySlot(ctx, msg)

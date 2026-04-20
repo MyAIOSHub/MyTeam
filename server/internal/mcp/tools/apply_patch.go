@@ -11,8 +11,8 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// ApplyPatch applies a unified-diff patch to a project working tree.
-// No server-side implementation exists yet.
+// ApplyPatch applies a unified-diff patch to a local project working tree.
+// LOCAL ONLY — refused in cloud runtime.
 type ApplyPatch struct{}
 
 func (ApplyPatch) Name() string { return "apply_patch" }
@@ -31,10 +31,14 @@ func (ApplyPatch) InputSchema() any {
 }
 
 func (ApplyPatch) RuntimeModes() []string {
-	return []string{mcptool.RuntimeLocal, mcptool.RuntimeCloud}
+	return []string{mcptool.RuntimeLocal}
 }
 
 func (ApplyPatch) Exec(ctx context.Context, q *db.Queries, ws mcptool.Context, args map[string]any) (mcptool.Result, error) {
+	if ws.RuntimeMode != mcptool.RuntimeLocal {
+		return toolNotAvailable("apply_patch is not available in cloud runtime; TODO: wire SDK sandbox patch application"), nil
+	}
+
 	projectID, err := uuidArg(args, "project_id")
 	if err != nil {
 		return mcptool.Result{}, err
@@ -44,10 +48,6 @@ func (ApplyPatch) Exec(ctx context.Context, q *db.Queries, ws mcptool.Context, a
 			return result, nil
 		}
 		return mcptool.Result{}, err
-	}
-
-	if ws.RuntimeMode == mcptool.RuntimeCloud {
-		return toolNotAvailable("apply_patch is not available in cloud runtime; TODO: wire SDK sandbox patch application"), nil
 	}
 
 	patch := stringArg(args, "patch")

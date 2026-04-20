@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -110,6 +111,24 @@ func randStr() string {
 	// Atomic counter + nanosecond timestamp keeps it unique across rapid calls.
 	n := atomic.AddUint64(&medRandCounter, 1)
 	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), n)
+}
+
+func TestMediationTimeoutContextExpires(t *testing.T) {
+	ctx, cancel := mediationTimeoutContext(context.Background(), 25*time.Millisecond)
+	defer cancel()
+
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("expected timeout context to have a deadline")
+	}
+	if until := time.Until(deadline); until <= 0 || until > 100*time.Millisecond {
+		t.Fatalf("expected deadline to be near-term, got %s", until)
+	}
+
+	<-ctx.Done()
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatalf("expected deadline exceeded, got %v", ctx.Err())
+	}
 }
 
 // newMessage inserts a member message into the channel.
@@ -566,4 +585,3 @@ func inboxHasTier(t *testing.T, pool *pgxpool.Pool, wsID pgtype.UUID, tier strin
 	}
 	return false
 }
-

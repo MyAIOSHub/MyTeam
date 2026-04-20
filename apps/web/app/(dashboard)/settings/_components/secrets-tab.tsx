@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { api } from "@/shared/api";
 import { useWorkspaceStore } from "@/features/workspace";
 import type { WorkspaceSecretMeta } from "@/shared/types";
+import { getSettingsErrorMessage } from "./settings-error";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,7 +46,7 @@ export function SecretsTab() {
       setSecrets(list);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "加载密钥失败");
+      setError(getSettingsErrorMessage(e, "加载密钥失败"));
     } finally {
       setLoading(false);
     }
@@ -62,7 +63,7 @@ export function SecretsTab() {
       const { value } = await api.getWorkspaceSecret(workspace.id, key);
       setRevealedValues((m) => ({ ...m, [key]: value }));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "查看密钥失败");
+      toast.error(getSettingsErrorMessage(e, "查看密钥失败"));
     } finally {
       setRevealing(null);
     }
@@ -84,7 +85,7 @@ export function SecretsTab() {
       await reload();
       toast.success(`密钥 "${key}" 已删除`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "删除密钥失败");
+      toast.error(getSettingsErrorMessage(e, "删除密钥失败"));
     } finally {
       setDeletingKey(null);
       setDeleteConfirmKey(null);
@@ -260,7 +261,7 @@ function NewSecretForm({
       onCreated();
       toast.success(`密钥 "${trimmedKey}" 已保存`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "保存密钥失败");
+      toast.error(getSettingsErrorMessage(e, "保存密钥失败"));
     } finally {
       setSubmitting(false);
     }

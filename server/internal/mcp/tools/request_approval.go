@@ -68,6 +68,9 @@ func (RequestApproval) Exec(ctx context.Context, q *db.Queries, ws mcptool.Conte
 	if err != nil {
 		return mcptool.Result{}, fmt.Errorf("get project: %w", err)
 	}
+	if !sameUUID(project.WorkspaceID, ws.WorkspaceID) {
+		return permissionDenied("project does not belong to caller workspace"), nil
+	}
 	if !project.CreatorOwnerID.Valid {
 		return mcptool.Result{Errors: []string{"PROJECT_HAS_NO_OWNER"}, Note: "project missing creator_owner_id"}, nil
 	}
@@ -93,11 +96,11 @@ func (RequestApproval) Exec(ctx context.Context, q *db.Queries, ws mcptool.Conte
 		RecipientID:   project.CreatorOwnerID,
 		Type:          "human_input_needed",
 		Severity:      "action_required",
-		IssueID:       toPgNullUUID(uuid.Nil),
+		IssueID:       pgUUID(uuid.Nil),
 		Title:         title,
 		Body:          toPgNullText(body),
 		ActorType:     toPgNullText(actorTypeFromCtx(ws)),
-		ActorID:       toPgNullUUID(actorIDFromCtx(ws)),
+		ActorID:       pgUUID(actorIDFromCtx(ws)),
 		Details:       details,
 	})
 	if err != nil {

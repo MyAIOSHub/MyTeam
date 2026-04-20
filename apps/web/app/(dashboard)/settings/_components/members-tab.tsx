@@ -38,6 +38,7 @@ import {
 import { toast } from "sonner";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceManagement } from "@/features/workspace";
+import { getSettingsErrorMessage } from "./settings-error";
 
 const roleConfig: Record<MemberRole, { label: string; icon: typeof Crown; description: string }> = {
   owner: { label: "所有者", icon: Crown, description: "完全访问权限，管理所有设置" },
@@ -171,7 +172,7 @@ export function MembersTab() {
       setInviteRole("member");
       toast.success("已添加成员");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "添加成员失败");
+      toast.error(getSettingsErrorMessage(e, "添加成员失败"));
     } finally {
       setInviteLoading(false);
     }
@@ -184,7 +185,7 @@ export function MembersTab() {
       await changeMemberRole(memberId, role);
       toast.success("角色已更新");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "更新成员失败");
+      toast.error(getSettingsErrorMessage(e, "更新成员失败"));
     } finally {
       setMemberActionId(null);
     }
@@ -202,7 +203,7 @@ export function MembersTab() {
           await removeMember(member.id);
           toast.success("成员已移除");
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : "移除成员失败");
+          toast.error(getSettingsErrorMessage(e, "移除成员失败"));
         } finally {
           setMemberActionId(null);
         }

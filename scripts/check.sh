@@ -78,6 +78,8 @@ wait_for_port() {
 # Step 0: Ensure DB
 # --------------------------------------------------------------------------
 echo "==> Using env file: $ENV_FILE"
+echo "==> Validating React catalog..."
+node scripts/check-react-catalog.mjs || { EXIT_CODE=1; exit 1; }
 echo "==> Checking PostgreSQL..."
 bash scripts/ensure-postgres.sh "$ENV_FILE"
 
@@ -104,7 +106,7 @@ pnpm --filter @myteam/desktop test || { EXIT_CODE=1; exit 1; }
 # --------------------------------------------------------------------------
 echo ""
 echo "==> [3/5] Go tests..."
-(cd server && go test ./...) || { EXIT_CODE=1; exit 1; }
+(cd server && go test -race ./...) || { EXIT_CODE=1; exit 1; }
 
 # --------------------------------------------------------------------------
 # Step 4: Start services for E2E (only if not already running)

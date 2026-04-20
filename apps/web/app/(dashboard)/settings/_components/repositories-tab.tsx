@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
 import { useWorkspaceManagement } from "@/features/workspace";
 import type { WorkspaceRepo } from "@/shared/types";
+import { getSettingsErrorMessage } from "./settings-error";
 
 export function RepositoriesTab() {
   const { workspace, canManageWorkspace, saveWorkspace } = useWorkspaceManagement();
@@ -26,7 +27,7 @@ export function RepositoriesTab() {
       await saveWorkspace({ repos });
       toast.success("仓库已保存");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "保存仓库失败");
+      toast.error(getSettingsErrorMessage(e, "保存仓库失败"));
     } finally {
       setSaving(false);
     }

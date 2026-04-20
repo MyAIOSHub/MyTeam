@@ -278,6 +278,9 @@ func TestGetProjectReturnsProjectFromCallerWorkspace(t *testing.T) {
 	if !containsError(result.Errors, errcode.ProjectNotFound.Code) {
 		t.Fatalf("expected project not found error, got %#v", result)
 	}
+	if result.Note != errcode.ProjectNotFound.Message {
+		t.Fatalf("expected note %q, got %q", errcode.ProjectNotFound.Message, result.Note)
+	}
 }
 
 func TestSearchProjectContextReturnsMatchingItemsForProjectThreads(t *testing.T) {
@@ -497,8 +500,8 @@ type fakeRows struct {
 	err  error
 }
 
-func (r *fakeRows) Close()                                      {}
-func (r *fakeRows) Err() error                                  { return r.err }
+func (r *fakeRows) Close()                                       {}
+func (r *fakeRows) Err() error                                   { return r.err }
 func (r *fakeRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
 func (r *fakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (r *fakeRows) RawValues() [][]byte                          { return nil }
@@ -625,7 +628,6 @@ func pgUUIDEqual(got any, want pgtype.UUID) bool {
 	gotUUID, ok := got.(pgtype.UUID)
 	return ok && gotUUID.Valid == want.Valid && gotUUID.Bytes == want.Bytes
 }
-
 
 func testTime(offset int) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: time.Unix(int64(offset), 0).UTC(), Valid: true}

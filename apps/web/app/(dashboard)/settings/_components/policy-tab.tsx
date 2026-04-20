@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useWorkspaceManagement } from "@/features/workspace";
+import { getSettingsErrorMessage } from "./settings-error";
 
 type PolicyField =
   | {
@@ -85,7 +86,7 @@ export function PolicyTab({ scope, title, description, fields }: PolicyTabProps)
       }));
       toast.success(`${title}已保存`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : `保存${title}失败`);
+      toast.error(getSettingsErrorMessage(error, `保存${title}失败`));
     } finally {
       setSaving(false);
     }

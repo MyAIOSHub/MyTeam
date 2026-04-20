@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 
+	"github.com/multica-ai/multica/server/internal/errcode"
 	"github.com/multica-ai/multica/server/internal/mcp/mcptool"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -46,7 +47,10 @@ func (GetProject) Exec(ctx context.Context, q *db.Queries, ws mcptool.Context, a
 		return mcptool.Result{}, err
 	}
 	if !sameUUID(project.WorkspaceID, ws.WorkspaceID) {
-		return notFoundResult("PROJECT"), nil
+		return mcptool.Result{
+			Errors: []string{errcode.ProjectNotFound.Code},
+			Note:   errcode.ProjectNotFound.Message,
+		}, nil
 	}
 
 	return mcptool.Result{Data: map[string]any{

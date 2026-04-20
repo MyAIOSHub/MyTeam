@@ -35,6 +35,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { api } from "@/shared/api";
+import { getSettingsErrorMessage } from "./settings-error";
 
 export function TokensTab() {
   const [tokens, setTokens] = useState<PersonalAccessToken[]>([]);
@@ -52,7 +53,7 @@ export function TokensTab() {
       const list = await api.listPersonalAccessTokens();
       setTokens(list);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "加载令牌失败");
+      toast.error(getSettingsErrorMessage(e, "加载令牌失败"));
     } finally {
       setTokensLoading(false);
     }
@@ -70,7 +71,7 @@ export function TokensTab() {
       setTokenExpiry("90");
       await loadTokens();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "创建令牌失败");
+      toast.error(getSettingsErrorMessage(e, "创建令牌失败"));
     } finally {
       setTokenCreating(false);
     }
@@ -83,7 +84,7 @@ export function TokensTab() {
       await loadTokens();
       toast.success("令牌已撤销");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "撤销令牌失败");
+      toast.error(getSettingsErrorMessage(e, "撤销令牌失败"));
     } finally {
       setTokenRevoking(null);
     }

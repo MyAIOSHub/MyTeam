@@ -6,7 +6,9 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mcp/mcptool"
+	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -76,13 +78,13 @@ func (CompleteTask) Exec(ctx context.Context, q *db.Queries, ws mcptool.Context,
 		execID = uuid.UUID(execs[0].ID.Bytes)
 	}
 
-	scheduler := buildScheduler(q)
+	scheduler := buildScheduler(q, ws.Bus, ws.Hub)
 	if err := scheduler.HandleTaskCompletion(ctx, taskID, execID, result); err != nil {
 		return mcptool.Result{}, fmt.Errorf("handle task completion: %w", err)
 	}
 
 	// Reload the task so callers see the post-cascade status.
-	updated, err := q.GetTask(ctx, toPgUUID(taskID))
+	updated, err := q.GetTask(ctx, pgUUID(taskID))
 	if err != nil {
 		return mcptool.Result{}, fmt.Errorf("reload task: %w", err)
 	}
@@ -91,19 +93,15 @@ func (CompleteTask) Exec(ctx context.Context, q *db.Queries, ws mcptool.Context,
 
 // buildScheduler constructs a SchedulerService for MCP tools.
 //
-// KNOWN GAP (Codex review B1.1, deferred): Bus + Hub are nil here, so
-// HandleTaskCompletion's WS broadcasts (task.completed, run.completed) and
-// internal event publishes are silently dropped. The fix needs the MCP
-// dispatcher (server/internal/mcp/dispatcher.go) to own a Bus + Hub and
-// inject them into Context, then thread through here. Tracked separately
-// because it touches the dispatcher contract — out of scope for the
-// task-tool hardening pass.
-func buildScheduler(q *db.Queries) *service.SchedulerService {
+// Bus/Hub are optional so tests and local tooling can stay lightweight.
+// When provided, the scheduler gets the same event side effects as the
+// HTTP handler path.
+func buildScheduler(q *db.Queries, bus *events.Bus, hub *realtime.Hub) *service.SchedulerService {
 	slots := service.NewSlotService(q)
 	artifacts := service.NewArtifactService(q)
 	reviews := service.NewReviewService(q, slots)
 	quota := service.NewQuotaService(q)
-	return service.NewSchedulerService(q, slots, artifacts, reviews, quota, nil, nil)
+	return service.NewSchedulerService(q, slots, artifacts, reviews, quota, bus, hub)
 }
 
 // completeTaskPayload is the JSON returned to the MCP caller after the

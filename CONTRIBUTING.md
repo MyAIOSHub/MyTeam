@@ -206,6 +206,28 @@ Both checkouts use:
 
 They do not share application data because each uses a different database.
 
+## Cleaning Up a Worktree
+
+When you are done with a worktree, verify what Git still knows about it first:
+
+```bash
+git worktree list
+```
+
+Then remove the worktree by path from a different checkout:
+
+```bash
+git worktree remove ../multica-feature
+```
+
+If a worktree directory was deleted manually or Git still shows a stale entry, prune the leftovers:
+
+```bash
+git worktree prune
+```
+
+Use `git worktree list` again after cleanup to confirm the entry is gone.
+
 ## Command Reference
 
 ### Checkout-Local Infrastructure

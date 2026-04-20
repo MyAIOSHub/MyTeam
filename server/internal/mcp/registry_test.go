@@ -43,4 +43,10 @@ func TestLocalOnlyTools(t *testing.T) {
 			t.Errorf("%q should be local-only; got %v", name, modes)
 		}
 	}
+	for _, name := range []string{"apply_patch"} {
+		modes := Get(name).RuntimeModes()
+		if len(modes) != 1 || modes[0] != "local" {
+			t.Errorf("%q should be local-only; got %v", name, modes)
+		}
+	}
 }

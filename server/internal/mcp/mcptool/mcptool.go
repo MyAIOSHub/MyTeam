@@ -10,6 +10,8 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/service/memory"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -52,6 +54,12 @@ type Context struct {
 	// Production wires it with WithIndexing so Promote auto-chunks +
 	// embeds + upserts. When nil, memory_* tools refuse to run.
 	Memory *memory.Service
+
+	// Bus and Hub are optional event-side-effect handles used by tools
+	// that need the same lifecycle notifications as the HTTP handlers.
+	// When nil, tools may degrade by skipping broadcasts.
+	Bus *events.Bus
+	Hub *realtime.Hub
 }
 
 // Result is the JSON-serializable response from a tool execution.

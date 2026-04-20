@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { useAuthStore } from "@/features/auth";
 import { api } from "@/shared/api";
 import { useFileUpload } from "@/shared/hooks/use-file-upload";
+import { getSettingsErrorMessage } from "./settings-error";
 
 export function AccountTab() {
   const user = useAuthStore((s) => s.user);
@@ -43,7 +44,7 @@ export function AccountTab() {
       setUser(updated);
       toast.success("头像已更新");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "上传头像失败");
+      toast.error(getSettingsErrorMessage(err, "上传头像失败"));
     }
   };
 
@@ -54,7 +55,7 @@ export function AccountTab() {
       setUser(updated);
       toast.success("个人资料已更新");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "更新个人资料失败");
+      toast.error(getSettingsErrorMessage(e, "更新个人资料失败"));
     } finally {
       setProfileSaving(false);
     }

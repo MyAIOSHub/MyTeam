@@ -3,24 +3,24 @@
 //
 // Lifecycle:
 //
-//   ScheduleRun(plan,run): reset all tasks/slots, then ScheduleTask each
-//   task with no unmet depends_on dependencies.
+//	ScheduleRun(plan,run): reset all tasks/slots, then ScheduleTask each
+//	task with no unmet depends_on dependencies.
 //
-//   ScheduleTask(task): activate before_execution slots; if a blocking
-//   human_input slot becomes ready the task transitions to needs_human and
-//   waits for the human. Otherwise pick an available agent (primary →
-//   fallback), create an Execution row, and put the task into queued.
+//	ScheduleTask(task): activate before_execution slots; if a blocking
+//	human_input slot becomes ready the task transitions to needs_human and
+//	waits for the human. Otherwise pick an available agent (primary →
+//	fallback), create an Execution row, and put the task into queued.
 //
-//   HandleTaskCompletion(task,exec,result): mark agent_execution slot
-//   submitted, persist a result Artifact, activate before_done slots; if a
-//   human_review slot becomes ready the task moves to under_review and we
-//   wait for ReviewService to drive it forward. Otherwise the task is
-//   completed, downstream tasks whose deps are now satisfied are scheduled,
-//   and the run is checked for terminal state.
+//	HandleTaskCompletion(task,exec,result): mark agent_execution slot
+//	submitted, persist a result Artifact, activate before_done slots; if a
+//	human_review slot becomes ready the task moves to under_review and we
+//	wait for ReviewService to drive it forward. Otherwise the task is
+//	completed, downstream tasks whose deps are now satisfied are scheduled,
+//	and the run is checked for terminal state.
 //
-//   HandleTaskFailure(task,exec,err): retry within retry_rule.max_retries,
-//   then try the next fallback agent, then give up by setting the task to
-//   needs_attention. HandleTaskTimeout is the same path with err=timeout.
+//	HandleTaskFailure(task,exec,err): retry within retry_rule.max_retries,
+//	then try the next fallback agent, then give up by setting the task to
+//	needs_attention. HandleTaskTimeout is the same path with err=timeout.
 //
 // Dependency direction: scheduler depends on Slots / Artifacts / Reviews /
 // Quota and publishes events through Bus + Hub. It does not call any of
@@ -719,12 +719,19 @@ func scoreAgentForTask(agent db.Agent, runtime db.AgentRuntime, task db.Task, is
 		skill = 1.0
 	}
 
+	if runtime.ConcurrencyLimit <= 0 {
+		slog.Error("scheduler invariant violated: runtime concurrency_limit must be positive",
+			"runtime_id", uuid.UUID(runtime.ID.Bytes),
+			"concurrency_limit", runtime.ConcurrencyLimit,
+			"current_load", runtime.CurrentLoad)
+		panic(fmt.Sprintf("scheduler invariant violated: runtime concurrency_limit must be positive (runtime_id=%s concurrency_limit=%d current_load=%d)",
+			uuid.UUID(runtime.ID.Bytes), runtime.ConcurrencyLimit, runtime.CurrentLoad))
+	}
+
 	var load float64
-	if runtime.ConcurrencyLimit > 0 {
-		load = 1.0 - float64(runtime.CurrentLoad)/float64(runtime.ConcurrencyLimit)
-		if load < 0 {
-			load = 0
-		}
+	load = 1.0 - float64(runtime.CurrentLoad)/float64(runtime.ConcurrencyLimit)
+	if load < 0 {
+		load = 0
 	}
 
 	// Brand-new agents (no last_active_at yet) score neutral, not worst —

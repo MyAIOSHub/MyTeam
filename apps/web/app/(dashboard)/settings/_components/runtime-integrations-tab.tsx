@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { useWorkspaceManagement } from "@/features/workspace";
 import { api } from "@/shared/api";
 import type { AgentRuntime } from "@/shared/types";
+import { getSettingsErrorMessage } from "./settings-error";
 
 interface RuntimeSettings {
   default_provider: string;
@@ -76,7 +77,7 @@ export function RuntimeIntegrationsTab() {
       }));
       toast.success("Runtime & Integrations 已保存");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "保存运行策略失败");
+      toast.error(getSettingsErrorMessage(error, "保存运行策略失败"));
     } finally {
       setSaving(false);
     }

@@ -46,8 +46,8 @@ func (DownloadAttachment) Exec(ctx context.Context, q *db.Queries, ws mcptool.Co
 	}
 
 	att, err := q.GetAttachment(ctx, db.GetAttachmentParams{
-		ID:          toPgUUID(attID),
-		WorkspaceID: toPgUUID(ws.WorkspaceID),
+		ID:          pgUUID(attID),
+		WorkspaceID: pgUUID(ws.WorkspaceID),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

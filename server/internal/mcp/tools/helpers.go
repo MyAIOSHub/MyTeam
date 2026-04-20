@@ -1,8 +1,6 @@
 // Package tools: helpers.go — shared utilities for the MCP tool
 // implementations. Holds argument parsing, permission checks, and the
-// pgtype <-> uuid conversion helpers that every tool needs. Merged from
-// the mcp-task-artifact and mcp-file-tools tracks; conflicts resolved by
-// keeping the broader signature when both diverged.
+// pgtype <-> uuid conversion helper shared by the tools.
 package tools
 
 import (
@@ -90,19 +88,6 @@ func pgUUID(id uuid.UUID) pgtype.UUID {
 	return pgtype.UUID{Bytes: id, Valid: id != uuid.Nil}
 }
 
-// toPgUUID is an alias kept for the mcp-task-artifact callers that pass a
-// guaranteed-non-nil UUID. Same behavior as pgUUID — both yield Valid=true
-// for any non-zero UUID.
-func toPgUUID(id uuid.UUID) pgtype.UUID {
-	return pgUUID(id)
-}
-
-// toPgNullUUID is the explicit "this might be NULL" form. Identical
-// behavior to pgUUID — kept so call sites read clearly.
-func toPgNullUUID(id uuid.UUID) pgtype.UUID {
-	return pgUUID(id)
-}
-
 // toPgNullText converts an optional string to pgtype.Text; empty becomes
 // Valid=false (NULL).
 func toPgNullText(s string) pgtype.Text {
@@ -133,7 +118,8 @@ func permissionDenied(note string) mcptool.Result {
 	}
 }
 
-// notFoundResult is the canonical "row missing" result.
+// notFoundResult returns the legacy "row missing" result for tool-specific
+// kinds that do not yet have a canonical errcode constant.
 func notFoundResult(kind string) mcptool.Result {
 	return mcptool.Result{
 		Errors: []string{kind + "_NOT_FOUND"},
