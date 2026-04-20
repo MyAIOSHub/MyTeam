@@ -7,37 +7,41 @@ test.describe("Navigation", () => {
   });
 
   test("sidebar navigation works", async ({ page }) => {
-    // Click Inbox
-    await page.locator("nav a", { hasText: "Inbox" }).click();
-    await page.waitForURL("**/inbox");
-    await expect(page).toHaveURL(/\/inbox/);
+    await page.getByRole("link", { name: "会话" }).click();
+    await page.waitForURL("**/session");
+    await expect(page.getByPlaceholder("搜索会话...")).toBeVisible();
 
-    // Click Agents
-    await page.locator("nav a", { hasText: "Agents" }).click();
-    await page.waitForURL("**/agents");
-    await expect(page).toHaveURL(/\/agents/);
+    await page.getByRole("link", { name: "项目" }).click();
+    await page.waitForURL("**/projects");
+    await expect(page.getByRole("button", { name: "创建项目" })).toBeVisible();
 
-    // Click Issues
-    await page.locator("nav a", { hasText: "Issues" }).click();
-    await page.waitForURL("**/issues");
-    await expect(page).toHaveURL(/\/issues/);
-  });
+    await page.getByRole("link", { name: "文件" }).click();
+    await page.waitForURL("**/files");
+    await expect(page.getByRole("heading", { name: /文件/ })).toBeVisible();
 
-  test("settings page loads via workspace menu", async ({ page }) => {
-    // Settings is inside the workspace dropdown menu
-    await openWorkspaceMenu(page);
-    await page.locator("text=Settings").click();
+    await page.getByRole("link", { name: "身份" }).click();
+    await page.waitForURL("**/account");
+    await expect(page.getByRole("heading", { name: "概览", exact: true })).toBeVisible();
+
+    await page.getByRole("link", { name: "设置" }).click();
     await page.waitForURL("**/settings");
-
-    await expect(page.getByRole("heading", { name: "Workspace" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Members" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "设置" })).toBeVisible();
   });
 
-  test("agents page shows agent list", async ({ page }) => {
-    await page.locator("nav a", { hasText: "Agents" }).click();
-    await page.waitForURL("**/agents");
+  test("workspace menu opens current workspace controls", async ({ page }) => {
+    await openWorkspaceMenu(page);
 
-    // Should show "Agents" heading
-    await expect(page.locator("text=Agents").first()).toBeVisible();
+    await expect(page.getByText("工作区")).toBeVisible();
+    await expect(page.getByText("退出登录")).toBeVisible();
+  });
+
+  test("session page can open and close the create channel dialog", async ({ page }) => {
+    await page.goto("/session");
+    await page.waitForURL("**/session");
+
+    await page.getByRole("button", { name: "创建频道" }).click();
+    await expect(page.getByPlaceholder("频道名称")).toBeVisible();
+    await page.getByRole("button", { name: "取消" }).click();
+    await expect(page.getByPlaceholder("频道名称")).not.toBeVisible();
   });
 });

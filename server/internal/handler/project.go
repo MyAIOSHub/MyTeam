@@ -94,8 +94,8 @@ func projectToResponse(p db.Project) ProjectResponse {
 	return resp
 }
 
-// projectVersionToResponse maps a db.ProjectVersion row to the JSON shape.
-func projectVersionToResponse(v db.ProjectVersion) ProjectVersionResponse {
+// projectVersionToResponse maps the current list query shape to the JSON response.
+func projectVersionToResponse(v db.ListProjectVersionsRow) ProjectVersionResponse {
 	resp := ProjectVersionResponse{
 		ID:            uuidToString(v.ID),
 		ProjectID:     uuidToString(v.ProjectID),

@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // activityCleanup deletes any activity_log rows linked to the given
@@ -237,14 +239,22 @@ func TestListActivityLog_ByTask(t *testing.T) {
 }
 
 // requestAs builds a request with a custom X-User-ID header (overriding the
-// owner default supplied by newRequest).
+// owner default supplied by newRequest). Also injects the workspace member
+// context so resolveWorkspaceID (which reads only context after the #20 fix)
+// resolves correctly for the impersonated user.
 func requestAs(t *testing.T, userID, method, path string) *http.Request {
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-ID", userID)
-	req.Header.Set("X-Workspace-ID", testWorkspaceID)
-	return req
+	member, err := testHandler.Queries.GetMemberByUserAndWorkspace(req.Context(), db.GetMemberByUserAndWorkspaceParams{
+		UserID:      parseUUID(userID),
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("requestAs: member lookup for user %s failed: %v", userID, err)
+	}
+	return req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, member))
 }
 
 // listActivityProjectIDs decodes the entries response and returns the

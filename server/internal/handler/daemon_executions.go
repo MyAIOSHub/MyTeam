@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -76,7 +77,9 @@ func (h *Handler) ClaimExecution(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req claimExecutionRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if !decodeRequestJSONOptional(w, r, &req) {
+		return
+	}
 
 	// Default working_dir from the runtime row when the daemon doesn't
 	// supply one (e.g. cloud executor poll). Look up the runtime so we can
@@ -84,7 +87,7 @@ func (h *Handler) ClaimExecution(w http.ResponseWriter, r *http.Request) {
 	mode := "local"
 	if req.WorkingDir == "" || req.DaemonID == "" || mode == "" {
 		rt, rtErr := h.Queries.GetAgentRuntime(r.Context(), pgUUIDFrom(runtimeID))
-		if rtErr == nil {
+		if rtErr == nil && rt.ID.Valid {
 			if req.WorkingDir == "" && rt.WorkingDir != "" {
 				req.WorkingDir = rt.WorkingDir
 			}
@@ -97,11 +100,17 @@ func (h *Handler) ClaimExecution(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	contextRef, _ := json.Marshal(map[string]any{
+	contextRef, err := json.Marshal(map[string]any{
 		"mode":        mode,
 		"working_dir": req.WorkingDir,
 		"daemon_id":   req.DaemonID,
 	})
+	if err != nil {
+		slog.Warn("execution claim context_ref encode failed",
+			"runtime_id", runtimeID, "err", err)
+		writeError(w, http.StatusInternalServerError, "encode failed")
+		return
+	}
 
 	e, err := h.Queries.ClaimExecution(r.Context(), db.ClaimExecutionParams{
 		RuntimeID:  pgUUIDFrom(runtimeID),
@@ -148,11 +157,19 @@ func (h *Handler) StartExecution(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req startExecutionRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if !decodeRequestJSONOptional(w, r, &req) {
+		return
+	}
 
 	var ctxRefJSON []byte
 	if req.ContextRef != nil {
-		ctxRefJSON, _ = json.Marshal(req.ContextRef)
+		ctxRefJSON, err = json.Marshal(req.ContextRef)
+		if err != nil {
+			slog.Warn("execution start context_ref encode failed",
+				"execution_id", id, "err", err)
+			writeError(w, http.StatusInternalServerError, "encode failed")
+			return
+		}
 	}
 
 	if err := h.Queries.StartExecution(r.Context(), db.StartExecutionParams{
@@ -187,7 +204,9 @@ func (h *Handler) ProgressExecution(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req progressExecutionRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if !decodeRequestJSON(w, r, &req) {
+		return
+	}
 
 	h.publishExecutionEvent(r, "execution:progress", id, map[string]any{
 		"execution_id": id.String(),
@@ -223,8 +242,7 @@ func (h *Handler) CompleteExecution(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req completeExecutionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+	if !decodeRequestJSON(w, r, &req) {
 		return
 	}
 
@@ -305,7 +323,9 @@ func (h *Handler) FailExecution(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req failExecutionRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if !decodeRequestJSONOptional(w, r, &req) {
+		return
+	}
 	if req.Status == "" {
 		req.Status = "failed"
 	}
@@ -368,7 +388,9 @@ func (h *Handler) StreamExecutionMessage(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req executionMessageRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if !decodeRequestJSON(w, r, &req) {
+		return
+	}
 
 	h.publishExecutionEvent(r, "execution:message", id, map[string]any{
 		"execution_id": id.String(),
@@ -381,6 +403,35 @@ func (h *Handler) StreamExecutionMessage(w http.ResponseWriter, r *http.Request)
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+
+func decodeRequestJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(dst); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return false
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return false
+	}
+	return true
+}
+
+func decodeRequestJSONOptional(w http.ResponseWriter, r *http.Request, dst any) bool {
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(dst); err != nil {
+		if errors.Is(err, io.EOF) {
+			return true
+		}
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return false
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return false
+	}
+	return true
+}
 
 // publishExecutionEvent fans out an execution-scoped WS event when the
 // event bus is wired. Bus is optional so tests that bypass it remain
@@ -410,19 +461,19 @@ func (h *Handler) publishExecutionEvent(r *http.Request, eventType string, execu
 // daemon never has to inspect pgtype.* sentinel structs.
 func executionToResponse(e db.Execution) map[string]any {
 	out := map[string]any{
-		"id":         uuid.UUID(e.ID.Bytes).String(),
-		"task_id":    uuid.UUID(e.TaskID.Bytes).String(),
-		"run_id":     uuid.UUID(e.RunID.Bytes).String(),
-		"agent_id":   uuid.UUID(e.AgentID.Bytes).String(),
-		"runtime_id": uuid.UUID(e.RuntimeID.Bytes).String(),
-		"attempt":    e.Attempt,
-		"status":     e.Status,
-		"priority":   e.Priority,
-		"payload":    rawJSONOrEmpty(e.Payload),
-		"result":     rawJSONOrEmpty(e.Result),
-		"context_ref": rawJSONOrEmpty(e.ContextRef),
-		"cost_input_tokens":  e.CostInputTokens,
-		"cost_output_tokens": e.CostOutputTokens,
+		"id":                   uuid.UUID(e.ID.Bytes).String(),
+		"task_id":              uuid.UUID(e.TaskID.Bytes).String(),
+		"run_id":               uuid.UUID(e.RunID.Bytes).String(),
+		"agent_id":             uuid.UUID(e.AgentID.Bytes).String(),
+		"runtime_id":           uuid.UUID(e.RuntimeID.Bytes).String(),
+		"attempt":              e.Attempt,
+		"status":               e.Status,
+		"priority":             e.Priority,
+		"payload":              rawJSONOrEmpty(e.Payload),
+		"result":               rawJSONOrEmpty(e.Result),
+		"context_ref":          rawJSONOrEmpty(e.ContextRef),
+		"cost_input_tokens":    e.CostInputTokens,
+		"cost_output_tokens":   e.CostOutputTokens,
 		"log_retention_policy": e.LogRetentionPolicy,
 	}
 	if e.SlotID.Valid {
