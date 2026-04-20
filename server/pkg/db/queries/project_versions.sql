@@ -1,7 +1,17 @@
 -- name: CreateProjectVersion :one
 INSERT INTO project_version (project_id, parent_version_id, version_number, branch_name, fork_reason, created_by)
 VALUES (@project_id, @parent_version_id, @version_number, @branch_name, @fork_reason, @created_by)
-RETURNING *;
+RETURNING
+    id,
+    project_id,
+    parent_version_id,
+    version_number,
+    branch_name,
+    fork_reason,
+    version_status,
+    created_by,
+    created_at,
+    context_imports;
 
 -- name: ListProjectVersions :many
 SELECT
@@ -19,7 +29,33 @@ WHERE project_id = @project_id
 ORDER BY version_number DESC;
 
 -- name: GetProjectVersion :one
-SELECT * FROM project_version WHERE id = @id;
+SELECT
+    id,
+    project_id,
+    parent_version_id,
+    version_number,
+    branch_name,
+    fork_reason,
+    version_status,
+    created_by,
+    created_at,
+    context_imports
+FROM project_version
+WHERE id = @id;
 
 -- name: GetLatestProjectVersion :one
-SELECT * FROM project_version WHERE project_id = @project_id ORDER BY version_number DESC LIMIT 1;
+SELECT
+    id,
+    project_id,
+    parent_version_id,
+    version_number,
+    branch_name,
+    fork_reason,
+    version_status,
+    created_by,
+    created_at,
+    context_imports
+FROM project_version
+WHERE project_id = @project_id
+ORDER BY version_number DESC
+LIMIT 1;
