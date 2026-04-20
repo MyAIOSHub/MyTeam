@@ -20,7 +20,7 @@ POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-multica}"
 
 export PGPASSWORD="$POSTGRES_PASSWORD"
 
-echo "==> Ensuring shared PostgreSQL container is running on localhost:5432..."
+echo "==> Ensuring PostgreSQL container is running on localhost:${POSTGRES_PORT}..."
 docker compose up -d postgres
 
 echo "==> Waiting for PostgreSQL to be ready..."

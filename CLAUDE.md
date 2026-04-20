@@ -153,7 +153,7 @@ CI runs on Node 22 and Go 1.26.1 with a `pgvector/pgvector:pg17` PostgreSQL serv
 
 ### Worktree Support
 
-All checkouts share one PostgreSQL container. Isolation is at the database level — each worktree gets its own DB name and unique ports via `.env.worktree`. Main checkouts use `.env`.
+Each checkout gets its own PostgreSQL container and host port. Isolation is at the database level and the port level — each worktree gets its own DB name plus a unique `POSTGRES_PORT` via `.env.worktree`. Main checkouts use `.env`.
 
 ```bash
 make worktree-env       # Generate .env.worktree with unique DB/ports

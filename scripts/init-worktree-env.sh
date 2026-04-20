@@ -15,12 +15,13 @@ if [ -z "$slug" ]; then
 fi
 
 hash_value="$(printf '%s' "$PWD" | cksum | awk '{print $1}')"
-offset=$((hash_value % 1000))
+app_offset=$((hash_value % 1000))
+postgres_offset=$((hash_value % 10000))
 
-postgres_db="multica_${slug}_${offset}"
-postgres_port=5432
-backend_port=$((18080 + offset))
-frontend_port=$((13000 + offset))
+postgres_db="multica_${slug}_${postgres_offset}"
+postgres_port=$((15432 + postgres_offset))
+backend_port=$((18080 + app_offset))
+frontend_port=$((13000 + app_offset))
 frontend_origin="http://localhost:${frontend_port}"
 
 cat > "$ENV_FILE" <<EOF
@@ -46,7 +47,7 @@ NEXT_PUBLIC_WS_URL=ws://localhost:${backend_port}/ws
 EOF
 
 echo "Generated $ENV_FILE for worktree '$worktree_name'"
-echo "  Shared Postgres: localhost:${postgres_port}"
+echo "  PostgreSQL: localhost:${postgres_port}"
 echo "  Database: ${postgres_db}"
 echo "  Backend:  http://localhost:${backend_port}"
 echo "  Frontend: ${frontend_origin}"

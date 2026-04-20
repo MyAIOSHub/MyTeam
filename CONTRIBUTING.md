@@ -7,21 +7,21 @@ It covers:
 - first-time setup
 - day-to-day development in the main checkout
 - isolated worktree development
-- the shared PostgreSQL model
+- the checkout-local PostgreSQL model
 - testing and verification
 - troubleshooting and destructive reset options
 
 ## Development Model
 
-Local development uses one shared PostgreSQL container and one database per checkout.
+Local development uses one PostgreSQL container per checkout and one database per checkout.
 
 - the main checkout usually uses `.env` and `POSTGRES_DB=multica`
 - each Git worktree uses its own `.env.worktree`
-- every checkout connects to the same PostgreSQL host: `localhost:5432`
-- isolation happens at the database level, not by starting a separate Docker Compose project
+- the main checkout keeps PostgreSQL on `localhost:5432`
+- each worktree gets its own PostgreSQL host port and database name
 - backend and frontend ports are still unique per worktree
 
-This keeps Docker simple while still isolating schema and data.
+This keeps Docker simple while isolating schema, data, and local port bindings.
 
 ## Prerequisites
 
@@ -73,16 +73,16 @@ That generates values like:
 
 ```bash
 POSTGRES_DB=multica_my_feature_702
-POSTGRES_PORT=5432
+POSTGRES_PORT=18431
 PORT=18782
 FRONTEND_PORT=13702
-DATABASE_URL=postgres://multica:multica@localhost:5432/multica_my_feature_702?sslmode=disable
+DATABASE_URL=postgres://multica:multica@localhost:18431/multica_my_feature_702?sslmode=disable
 ```
 
 Notes:
 
 - `POSTGRES_DB` is unique per worktree
-- `POSTGRES_PORT` stays fixed at `5432`
+- `POSTGRES_PORT` is unique per worktree
 - backend and frontend ports are derived from the worktree path hash
 - `make worktree-env` refuses to overwrite an existing `.env.worktree`
 
@@ -106,7 +106,7 @@ make setup-main
 What `make setup-main` does:
 
 - installs JavaScript dependencies with `pnpm install`
-- ensures the shared PostgreSQL container is running
+- ensures the PostgreSQL container for this checkout is running
 - creates the application database if it does not exist
 - runs all migrations against that database
 
@@ -136,7 +136,7 @@ make setup-worktree
 What `make setup-worktree` does:
 
 - uses `.env.worktree`
-- ensures the shared PostgreSQL container is running
+- ensures the worktree PostgreSQL container is running on its generated host port
 - creates the worktree database if it does not exist
 - runs migrations against the worktree database
 
@@ -201,22 +201,22 @@ Example:
 
 Both checkouts use:
 
-- the same PostgreSQL container
-- the same PostgreSQL port: `5432`
+- separate PostgreSQL containers for each checkout
+- separate PostgreSQL host ports
 
-But they do not share application data, because each uses a different database.
+They do not share application data because each uses a different database.
 
 ## Command Reference
 
-### Shared Infrastructure
+### Checkout-Local Infrastructure
 
-Start the shared PostgreSQL container:
+Start the PostgreSQL container for this checkout:
 
 ```bash
 make db-up
 ```
 
-Stop the shared PostgreSQL container:
+Stop the PostgreSQL container for this checkout:
 
 ```bash
 make db-down
@@ -393,7 +393,7 @@ That is expected.
 
 only stop backend/frontend processes.
 
-To stop the shared PostgreSQL container:
+To stop the PostgreSQL container for this checkout:
 
 ```bash
 make db-down

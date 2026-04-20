@@ -77,7 +77,7 @@ stop:
 	@echo "Stopping services..."
 	@-lsof -ti:$(PORT) | xargs kill -9 2>/dev/null
 	@-lsof -ti:$(FRONTEND_PORT) | xargs kill -9 2>/dev/null
-	@echo "✓ App processes stopped. Shared PostgreSQL is still running on localhost:5432."
+	@echo "✓ App processes stopped. PostgreSQL is still running on localhost:$(POSTGRES_PORT)."
 
 # Full verification: typecheck + unit tests + Go tests + E2E
 check:
@@ -106,7 +106,7 @@ check-main:
 	@ENV_FILE=$(MAIN_ENV_FILE) bash scripts/check.sh
 
 setup-worktree:
-	@echo "==> Generating $(WORKTREE_ENV_FILE) with unique ports..."
+	@echo "==> Generating $(WORKTREE_ENV_FILE) with unique DB and PostgreSQL ports..."
 	@FORCE=1 bash scripts/init-worktree-env.sh $(WORKTREE_ENV_FILE)
 	@$(MAKE) setup ENV_FILE=$(WORKTREE_ENV_FILE)
 
