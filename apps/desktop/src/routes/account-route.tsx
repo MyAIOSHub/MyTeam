@@ -1,18 +1,34 @@
-import { useEffect, useState } from "react";
+import { useCallback, useMemo } from "react";
 import type { Agent, AgentRuntime } from "@myteam/client-core";
 import { RouteShell } from "@/components/route-shell";
 import { desktopApi, useDesktopAuthStore, useDesktopWorkspaceStore } from "@/lib/desktop-client";
+import { RouteLoadState, useRouteRequest } from "./route-request";
 
 export function AccountRoute() {
   const user = useDesktopAuthStore((state) => state.user);
   const agents = useDesktopWorkspaceStore((state) => state.agents);
   const workspace = useDesktopWorkspaceStore((state) => state.workspace);
-  const [runtimes, setRuntimes] = useState<AgentRuntime[]>([]);
 
-  useEffect(() => {
-    if (!workspace?.id) return;
-    void desktopApi.listRuntimes({ workspace_id: workspace.id }).then(setRuntimes);
+  const loadRuntimes = useCallback(() => {
+    if (!workspace?.id) {
+      return Promise.resolve([] as AgentRuntime[]);
+    }
+    return desktopApi.listRuntimes({ workspace_id: workspace.id });
   }, [workspace?.id]);
+
+  const runtimeRequest = useRouteRequest({
+    enabled: Boolean(workspace?.id),
+    loader: loadRuntimes,
+    errorLabel: "Unable to load runtimes.",
+    timeoutLabel: "Loading runtimes timed out.",
+    dependencies: [workspace?.id],
+  });
+
+  const runtimes = runtimeRequest.data ?? [];
+  const runtimeById = useMemo(
+    () => new Map(runtimes.map((runtime) => [runtime.id, runtime] as const)),
+    [runtimes],
+  );
 
   return (
     <RouteShell
@@ -41,7 +57,28 @@ export function AccountRoute() {
             Device runtime mesh
           </p>
           <div className="mt-4 space-y-3">
-            {runtimes.length === 0 ? (
+            {!workspace?.id ? (
+              <RouteLoadState
+                title="Workspace loading"
+                message="Waiting for workspace details before runtimes can load."
+              />
+            ) : runtimeRequest.status === "loading" || runtimeRequest.status === "idle" ? (
+              <RouteLoadState
+                title="Loading runtimes"
+                message="Fetching the device runtime mesh."
+              />
+            ) : runtimeRequest.status === "error" || runtimeRequest.status === "timeout" ? (
+              <RouteLoadState
+                title="Runtime load failed"
+                message={
+                  runtimeRequest.status === "timeout"
+                    ? runtimeRequest.error ?? "Loading runtimes timed out."
+                    : "We couldn't load runtimes right now."
+                }
+                retryLabel="Retry runtimes"
+                onRetry={runtimeRequest.retry}
+              />
+            ) : runtimes.length === 0 ? (
               <EmptyState message="No runtimes are registered yet. Start the daemon from Settings or the local CLI." />
             ) : (
               runtimes.map((runtime) => (
@@ -82,7 +119,7 @@ export function AccountRoute() {
               <AgentCard
                 key={agent.id}
                 agent={agent}
-                runtime={runtimes.find((r) => r.id === agent.runtime_id) ?? null}
+                runtime={runtimeById.get(agent.runtime_id) ?? null}
               />
             ))
           )}

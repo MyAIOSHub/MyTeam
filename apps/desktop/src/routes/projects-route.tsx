@@ -1,20 +1,37 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Project } from "@myteam/client-core";
 import { RouteShell } from "@/components/route-shell";
 import { desktopApi, useDesktopWorkspaceStore } from "@/lib/desktop-client";
+import { RouteLoadState, useRouteRequest } from "./route-request";
 
 export function ProjectsRoute() {
   const workspace = useDesktopWorkspaceStore((state) => state.workspace);
-  const [projects, setProjects] = useState<Project[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  const loadProjects = useCallback(() => desktopApi.listProjects(), []);
+
+  const projectRequest = useRouteRequest({
+    enabled: Boolean(workspace?.id),
+    loader: loadProjects,
+    errorLabel: "Unable to load projects.",
+    timeoutLabel: "Loading projects timed out.",
+    dependencies: [workspace?.id],
+  });
+
+  const projects = projectRequest.data ?? [];
+
   useEffect(() => {
-    if (!workspace?.id) return;
-    void desktopApi.listProjects().then((nextProjects) => {
-      setProjects(nextProjects);
-      setSelectedId((current) => current ?? nextProjects[0]?.id ?? null);
-    });
-  }, [workspace?.id]);
+    if (projectRequest.status !== "ready") return;
+    if (projects.length === 0) {
+      setSelectedId(null);
+      return;
+    }
+    setSelectedId((current) =>
+      current && projects.some((project) => project.id === current)
+        ? current
+        : projects[0]?.id ?? null,
+    );
+  }, [projectRequest.status, projects]);
 
   const selectedProject = projects.find((project) => project.id === selectedId) ?? null;
 
@@ -30,7 +47,28 @@ export function ProjectsRoute() {
             Repo / project tree
           </p>
           <div className="mt-4 space-y-2">
-            {projects.length === 0 ? (
+            {!workspace?.id ? (
+              <RouteLoadState
+                title="Workspace loading"
+                message="Waiting for workspace details before projects can load."
+              />
+            ) : projectRequest.status === "loading" || projectRequest.status === "idle" ? (
+              <RouteLoadState
+                title="Loading projects"
+                message="Fetching the workspace project list."
+              />
+            ) : projectRequest.status === "error" || projectRequest.status === "timeout" ? (
+              <RouteLoadState
+                title="Project load failed"
+                message={
+                  projectRequest.status === "timeout"
+                    ? projectRequest.error ?? "Loading projects timed out."
+                    : "We couldn't load projects right now."
+                }
+                retryLabel="Retry projects"
+                onRetry={projectRequest.retry}
+              />
+            ) : projects.length === 0 ? (
               <div className="rounded-3xl border border-dashed border-border/70 bg-background/50 px-4 py-10 text-center text-sm text-muted-foreground">
                 No projects yet.
               </div>
@@ -94,6 +132,21 @@ export function ProjectsRoute() {
                 </p>
               </div>
             </>
+          ) : projectRequest.status === "loading" || projectRequest.status === "idle" ? (
+            <div className="rounded-3xl border border-dashed border-border/70 bg-background/50 px-4 py-16 text-center text-sm text-muted-foreground">
+              Loading project details...
+            </div>
+          ) : projectRequest.status === "error" || projectRequest.status === "timeout" ? (
+            <RouteLoadState
+              title="Project details failed"
+              message={
+                projectRequest.status === "timeout"
+                  ? projectRequest.error ?? "Loading projects timed out."
+                  : "We couldn't load projects right now."
+              }
+              retryLabel="Retry projects"
+              onRetry={projectRequest.retry}
+            />
           ) : (
             <div className="rounded-3xl border border-dashed border-border/70 bg-background/50 px-4 py-10 text-center text-sm text-muted-foreground">
               Select a project.

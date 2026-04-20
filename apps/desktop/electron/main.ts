@@ -2,7 +2,15 @@ import { app, BrowserWindow, ipcMain, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Store from "electron-store";
-import { isAllowedExternalURL, safeIPC, validateOpenablePath } from "./security";
+import {
+  isAllowedExternalURL,
+  requireNonEmptyString,
+  requireNotificationPayload,
+  requireString,
+  safeIPC,
+  safeIPCEvent,
+  validateOpenablePath,
+} from "./security";
 import type { SessionUser } from "@myteam/client-core";
 import {
   IPC_CHANNELS,
@@ -153,41 +161,60 @@ async function verifyCodeAndCreateSession(
   return resolveSessionFromToken(pat);
 }
 
-function registerIpc() {
-  ipcMain.handle(IPC_CHANNELS.authSendCode, async (_event, email: string) => {
-    await sendVerificationCode(email);
-  });
+export function registerIpc() {
+  ipcMain.handle(
+    IPC_CHANNELS.authSendCode,
+    safeIPC(IPC_CHANNELS.authSendCode, async (_event, email: unknown) => {
+      await sendVerificationCode(requireNonEmptyString(email, "email"));
+    }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.authVerifyCode,
-    async (_event, email: string, code: string) =>
-      verifyCodeAndCreateSession(email, code),
+    safeIPC(IPC_CHANNELS.authVerifyCode, async (_event, email: unknown, code: unknown) =>
+      verifyCodeAndCreateSession(
+        requireNonEmptyString(email, "email"),
+        requireNonEmptyString(code, "code"),
+      )),
   );
-  ipcMain.handle(IPC_CHANNELS.authGetStoredSession, async () => {
-    const token = await nativeBridge.getToken();
-    if (!token) return null;
-    try {
-      return await resolveSessionFromToken(token);
-    } catch {
+  ipcMain.handle(
+    IPC_CHANNELS.authGetStoredSession,
+    safeIPC(IPC_CHANNELS.authGetStoredSession, async () => {
+      const token = await nativeBridge.getToken();
+      if (!token) return null;
+      try {
+        return await resolveSessionFromToken(token);
+      } catch {
+        await nativeBridge.deleteToken();
+        return null;
+      }
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.authGetStoredToken,
+    safeIPC(IPC_CHANNELS.authGetStoredToken, async () => nativeBridge.getToken()),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.authSetStoredToken,
+    safeIPC(IPC_CHANNELS.authSetStoredToken, async (_event, token: unknown) => {
+      await nativeBridge.setToken(requireNonEmptyString(token, "token"));
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.authClearSession,
+    safeIPC(IPC_CHANNELS.authClearSession, async () => {
       await nativeBridge.deleteToken();
-      return null;
-    }
-  });
-  ipcMain.handle(IPC_CHANNELS.authGetStoredToken, async () => nativeBridge.getToken());
-  ipcMain.handle(IPC_CHANNELS.authSetStoredToken, async (_event, token: string) => {
-    await nativeBridge.setToken(token);
-  });
-  ipcMain.handle(IPC_CHANNELS.authClearSession, async () => {
-    await nativeBridge.deleteToken();
-    store.delete("workspaceId");
-  });
+      store.delete("workspaceId");
+    }),
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.shellOpenExternal,
-    safeIPC(IPC_CHANNELS.shellOpenExternal, async (_event, url: string) => {
-      if (!isAllowedExternalURL(url)) {
-        throw new Error(`shell.openExternal: blocked scheme in ${url}`);
+    safeIPC(IPC_CHANNELS.shellOpenExternal, async (_event, url: unknown) => {
+      const safeURL = requireNonEmptyString(url, "url");
+      if (!isAllowedExternalURL(safeURL)) {
+        throw new Error(`shell.openExternal: blocked scheme in ${safeURL}`);
       }
-      await shell.openExternal(url);
+      await shell.openExternal(safeURL);
     }),
   );
   ipcMain.handle(IPC_CHANNELS.shellGetConfig, async (): Promise<DesktopShellConfig> => ({
@@ -197,19 +224,25 @@ function registerIpc() {
     cliPath: runtimeController.getCliPath(),
     platform: process.platform,
   }));
-  ipcMain.handle(IPC_CHANNELS.shellGetPreference, async (_event, key: string) => {
-    const value = store.get(key);
-    return typeof value === "string" ? value : null;
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.shellGetPreference,
+    safeIPC(IPC_CHANNELS.shellGetPreference, async (_event, key: unknown) => {
+      const value = store.get(requireNonEmptyString(key, "key"));
+      return typeof value === "string" ? value : null;
+    }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.shellSetPreference,
-    async (_event, key: string, value: string) => {
-      store.set(key, value);
-    },
+    safeIPC(IPC_CHANNELS.shellSetPreference, async (_event, key: unknown, value: unknown) => {
+      store.set(requireNonEmptyString(key, "key"), requireString(value, "value"));
+    }),
   );
-  ipcMain.handle(IPC_CHANNELS.shellRemovePreference, async (_event, key: string) => {
-    store.delete(key);
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.shellRemovePreference,
+    safeIPC(IPC_CHANNELS.shellRemovePreference, async (_event, key: unknown) => {
+      store.delete(requireNonEmptyString(key, "key"));
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.windowMinimize, async () => mainWindow?.minimize());
   ipcMain.handle(IPC_CHANNELS.windowMaximize, async () => {
     if (!mainWindow) return;
@@ -239,28 +272,36 @@ function registerIpc() {
   );
   ipcMain.handle(
     IPC_CHANNELS.runtimeWatchWorkspace,
-    safeIPC(IPC_CHANNELS.runtimeWatchWorkspace, async (_event, workspaceId: string) => {
-      store.set("workspaceId", workspaceId);
-      await runtimeController.watchWorkspace(workspaceId);
+    safeIPC(IPC_CHANNELS.runtimeWatchWorkspace, async (_event, workspaceId: unknown) => {
+      const safeWorkspaceId = requireNonEmptyString(workspaceId, "workspaceId");
+      store.set("workspaceId", safeWorkspaceId);
+      await runtimeController.watchWorkspace(safeWorkspaceId);
     }),
   );
 
   ipcMain.handle(
     IPC_CHANNELS.fileOpenPath,
-    safeIPC(IPC_CHANNELS.fileOpenPath, async (_event, targetPath: string) => {
+    safeIPC(IPC_CHANNELS.fileOpenPath, async (_event, targetPath: unknown) => {
       await nativeBridge.openPath(validateOpenablePath(targetPath));
     }),
   );
   ipcMain.handle(
     IPC_CHANNELS.fileRevealPath,
-    safeIPC(IPC_CHANNELS.fileRevealPath, async (_event, targetPath: string) => {
+    safeIPC(IPC_CHANNELS.fileRevealPath, async (_event, targetPath: unknown) => {
       await nativeBridge.revealPath(validateOpenablePath(targetPath));
     }),
   );
-  ipcMain.handle(IPC_CHANNELS.fileOpenPanel, async () => nativeBridge.openPanel());
-  ipcMain.on(IPC_CHANNELS.notificationShow, (_event, payload: { title: string; body: string }) => {
-    void nativeBridge.showNotification(payload.title, payload.body);
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.fileOpenPanel,
+    safeIPC(IPC_CHANNELS.fileOpenPanel, async () => nativeBridge.openPanel()),
+  );
+  ipcMain.on(
+    IPC_CHANNELS.notificationShow,
+    safeIPCEvent(IPC_CHANNELS.notificationShow, async (_event, payload: unknown) => {
+      const notification = requireNotificationPayload(payload);
+      await nativeBridge.showNotification(notification.title, notification.body);
+    }),
+  );
 }
 
 app.whenReady().then(() => {

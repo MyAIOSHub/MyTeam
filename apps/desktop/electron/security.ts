@@ -4,6 +4,43 @@
 
 import path from "node:path";
 import { realpathSync } from "node:fs";
+import type { DesktopNotificationPayload } from "./preload-api";
+
+export class IPCValidationError extends Error {
+  readonly code = "IPC_VALIDATION_ERROR";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "IPCValidationError";
+  }
+}
+
+export function requireString(raw: unknown, label: string): string {
+  if (typeof raw !== "string") {
+    throw new IPCValidationError(`${label} must be a string`);
+  }
+  return raw;
+}
+
+export function requireNonEmptyString(raw: unknown, label: string): string {
+  const value = requireString(raw, label);
+  if (value.trim() === "") {
+    throw new IPCValidationError(`${label} required`);
+  }
+  return value;
+}
+
+export function requireNotificationPayload(raw: unknown): DesktopNotificationPayload {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new IPCValidationError("notification payload must be an object");
+  }
+
+  const payload = raw as Record<string, unknown>;
+  return {
+    title: requireNonEmptyString(payload.title, "notification.title"),
+    body: requireNonEmptyString(payload.body, "notification.body"),
+  };
+}
 
 // isAllowedExternalURL whitelists shell.openExternal targets. Blocks
 // `javascript:`, `file:`, `data:` — anything that could exfil tokens or
@@ -23,17 +60,15 @@ export function isAllowedExternalURL(raw: string): boolean {
 // renderer can't walk to /etc/passwd. Returns the realpath when the
 // file exists, the resolved input otherwise (lets the caller surface
 // the missing-file error). Issue #44.
-export function validateOpenablePath(raw: string): string {
-  if (typeof raw !== "string" || raw === "") {
-    throw new Error("path required");
+export function validateOpenablePath(raw: unknown): string {
+  const value = requireNonEmptyString(raw, "path");
+  if (value.startsWith("~") || /^[a-z][a-z0-9+.-]*:/i.test(value)) {
+    throw new Error(`path must not be a URL or shortcut: ${value}`);
   }
-  if (raw.startsWith("~") || /^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-    throw new Error(`path must not be a URL or shortcut: ${raw}`);
+  if (value.split(/[\\/]/).includes("..")) {
+    throw new Error(`path must not contain '..': ${value}`);
   }
-  if (raw.split(/[\\/]/).includes("..")) {
-    throw new Error(`path must not contain '..': ${raw}`);
-  }
-  const resolved = path.resolve(raw);
+  const resolved = path.resolve(value);
   try {
     return realpathSync(resolved);
   } catch {
@@ -55,7 +90,22 @@ export function safeIPC<TArgs extends unknown[], TResult>(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[ipc:${channel}] ${msg}`);
+      if (err instanceof Error) {
+        throw err;
+      }
       throw new Error(msg);
     }
+  };
+}
+
+export function safeIPCEvent<TArgs extends unknown[]>(
+  channel: string,
+  fn: (...args: TArgs) => Promise<void>,
+): (...args: TArgs) => void {
+  return (...args: TArgs) => {
+    void fn(...args).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[ipc:${channel}] ${msg}`);
+    });
   };
 }

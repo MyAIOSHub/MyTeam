@@ -19,6 +19,7 @@ const apiBaseUrl = resolveDesktopConfig(
 ).apiBaseUrl;
 
 const preferenceCache = new Map<string, string>();
+export const BOOTSTRAP_TIMEOUT_MS = 10_000;
 
 const preferenceStorage: SessionStorageLike = {
   getItem(key) {
@@ -39,6 +40,37 @@ const secrets: NativeSecrets = {
   setToken: (token: string) => window.myteam.auth.setStoredToken(token),
   deleteToken: () => window.myteam.auth.clearSession(),
 };
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timeoutId: number | null = null;
+  let timedOut = false;
+  const timeout = new Promise<T>((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      timedOut = true;
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([
+      promise.catch((error) => {
+        if (timedOut) {
+          return new Promise<T>(() => {});
+        }
+        throw error;
+      }),
+      timeout,
+    ]);
+  } finally {
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+  }
+}
 
 // WS client singleton — declared here so disconnectWS is hoisted before desktopApi
 let wsClient: WSClient | null = null;
@@ -135,28 +167,51 @@ useDesktopWorkspaceStore.subscribe((state, prevState) => {
 });
 
 export async function bootstrapDesktopApp() {
-  const storedWorkspaceId = await window.myteam.shell.getPreference(WORKSPACE_STORAGE_KEY);
+  const storedWorkspaceId = await withTimeout(
+    window.myteam.shell.getPreference(WORKSPACE_STORAGE_KEY),
+    BOOTSTRAP_TIMEOUT_MS,
+    "desktop preference bootstrap",
+  ).catch((error) => {
+    // eslint-disable-next-line no-console
+    console.warn("[bootstrap] preference lookup failed:", error);
+    return null;
+  });
+
   if (storedWorkspaceId) {
     preferenceCache.set(WORKSPACE_STORAGE_KEY, storedWorkspaceId);
   }
 
-  const session = await window.myteam.auth.getStoredSession();
+  const session = await withTimeout(
+    window.myteam.auth.getStoredSession(),
+    BOOTSTRAP_TIMEOUT_MS,
+    "stored session lookup",
+  ).catch((error) => {
+    // eslint-disable-next-line no-console
+    console.warn("[bootstrap] stored session lookup failed:", error);
+    return null;
+  });
+
   if (session) {
     await useDesktopAuthStore.getState().setSession(session.token, session.user);
   } else {
-    await useDesktopAuthStore.getState().initialize();
+    await withTimeout(
+      useDesktopAuthStore.getState().initialize(),
+      BOOTSTRAP_TIMEOUT_MS,
+      "auth initialization",
+    ).catch((error) => {
+      // eslint-disable-next-line no-console
+      console.warn("[bootstrap] auth initialization failed:", error);
+    });
   }
 
   if (useDesktopAuthStore.getState().user) {
-    await useDesktopWorkspaceStore.getState().bootstrap(storedWorkspaceId);
-    // Fire-and-forget: ensure the personal agent is provisioned on the server.
-    // Failure is non-fatal; Session UI will still load without an Assistant DM.
-    void desktopApi.getOrCreateSystemAgent().catch((err) => {
+    await withTimeout(
+      useDesktopWorkspaceStore.getState().bootstrap(storedWorkspaceId),
+      BOOTSTRAP_TIMEOUT_MS,
+      "workspace bootstrap",
+    ).catch((error) => {
       // eslint-disable-next-line no-console
-      console.warn("[bootstrap] ensure system agent failed:", err);
+      console.warn("[bootstrap] workspace bootstrap failed:", error);
     });
-    // WS connects via the auth-store subscription above when user populates.
-    // Trigger here too in case this app starts with a valid session.
-    ensureWSClient().connect();
   }
 }

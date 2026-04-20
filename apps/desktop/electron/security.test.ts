@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { isAllowedExternalURL, safeIPC, validateOpenablePath } from "./security";
+import { NativeBridgeError } from "./native-bridge";
 
 describe("isAllowedExternalURL", () => {
   it.each([
@@ -71,6 +72,17 @@ describe("safeIPC", () => {
       throw "string-thrown";
     });
     await expect(wrapped()).rejects.toThrow("string-thrown");
+    errSpy.mockRestore();
+  });
+
+  it("preserves typed Error subclasses so callers can branch on them", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const typedError = new NativeBridgeError("ENOENT", "swift runtime missing");
+    const wrapped = safeIPC("test", async () => {
+      throw typedError;
+    });
+
+    await expect(wrapped()).rejects.toBe(typedError);
     errSpy.mockRestore();
   });
 });
