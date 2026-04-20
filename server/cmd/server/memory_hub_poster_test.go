@@ -27,22 +27,26 @@ func TestPoster_NoOpWhenURLEmpty(t *testing.T) {
 // upstream sees POST + Authorization + Idempotency-Key + body shape, stop
 // drains worker.
 func TestPoster_PostsWithIdempotencyHeader(t *testing.T) {
-	var got struct {
+	type postedRequest struct {
 		method  string
 		path    string
 		auth    string
 		idemKey string
 		body    map[string]any
-		called  int32
 	}
+	var called int32
+	gotCh := make(chan postedRequest, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&got.called, 1)
-		got.method = r.Method
-		got.path = r.URL.Path
-		got.auth = r.Header.Get("Authorization")
-		got.idemKey = r.Header.Get("Idempotency-Key")
+		atomic.AddInt32(&called, 1)
+		got := postedRequest{
+			method:  r.Method,
+			path:    r.URL.Path,
+			auth:    r.Header.Get("Authorization"),
+			idemKey: r.Header.Get("Idempotency-Key"),
+		}
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &got.body)
+		gotCh <- got
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
@@ -59,11 +63,17 @@ func TestPoster_PostsWithIdempotencyHeader(t *testing.T) {
 
 	// Wait briefly for worker to consume + post.
 	deadline := time.Now().Add(2 * time.Second)
-	for atomic.LoadInt32(&got.called) == 0 && time.Now().Before(deadline) {
+	for atomic.LoadInt32(&called) == 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if atomic.LoadInt32(&got.called) == 0 {
+	if atomic.LoadInt32(&called) == 0 {
 		t.Fatal("upstream never called")
+	}
+	var got postedRequest
+	select {
+	case got = <-gotCh:
+	case <-time.After(time.Until(deadline)):
+		t.Fatal("upstream request snapshot never received")
 	}
 
 	if got.method != "POST" || got.path != "/api/v1/memories" {

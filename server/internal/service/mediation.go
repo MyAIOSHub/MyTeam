@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -417,6 +418,17 @@ func (s *MediationService) routeByCapabilityMatch(ctx context.Context, msg db.Me
 	if err != nil {
 		return nil
 	}
+	sort.SliceStable(members, func(i, j int) bool {
+		left := members[i]
+		right := members[j]
+		if left.JoinedAt.Valid && right.JoinedAt.Valid && !left.JoinedAt.Time.Equal(right.JoinedAt.Time) {
+			return left.JoinedAt.Time.Before(right.JoinedAt.Time)
+		}
+		if left.MemberType != right.MemberType {
+			return left.MemberType < right.MemberType
+		}
+		return util.UUIDToString(left.MemberID) < util.UUIDToString(right.MemberID)
+	})
 	senderID := util.UUIDToString(msg.SenderID)
 
 	for _, m := range members {

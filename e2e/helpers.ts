@@ -45,7 +45,7 @@ export async function loginWithApi(
   token: string,
   workspaceId: string,
 ) {
-  await page.goto("/login");
+  await page.goto("/login", { waitUntil: "domcontentloaded" });
   await page.evaluate(
     ({ nextToken, workspaceId }) => {
       localStorage.setItem("multica_token", nextToken);
@@ -53,8 +53,12 @@ export async function loginWithApi(
     },
     { nextToken: token, workspaceId },
   );
-  await page.goto("/projects");
+  await page.goto("/projects", { waitUntil: "domcontentloaded" });
   await page.waitForURL("**/projects", { timeout: 10000 });
+  await page.getByRole("button", { name: "创建项目" }).waitFor({
+    state: "visible",
+    timeout: 10000,
+  });
 }
 
 /**
@@ -71,6 +75,8 @@ export async function createTestApi(
 }
 
 export async function openWorkspaceMenu(page: Page) {
-  await page.locator('[data-slot="sidebar"]').getByRole("button").first().click();
+  const sidebar = page.locator('[data-slot="sidebar"]');
+  await sidebar.waitFor({ state: "visible", timeout: 10000 });
+  await sidebar.getByRole("button").first().click();
   await page.getByText("工作区").waitFor({ state: "visible" });
 }
