@@ -379,20 +379,24 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
 
   async function handleDelete() {
     if (!id) return;
+    setDeleting(true);
     try {
-      setDeleting(true);
+      // deleteProject now re-throws after surfacing its own error toast,
+      // so the success branch below runs only when the delete actually
+      // succeeded. The earlier version toasted "项目已删除" even when the
+      // API call failed, which is how the dialog kept dismissing without
+      // the row actually going away.
       await deleteProject(id);
       toast.success("项目已删除");
       setDeleteOpen(false);
       if (isInline) {
-        // Inline usage (projects list) has its own selection state — just
-        // let the parent re-render by refreshing the project list.
         await useProjectStore.getState().fetch();
       } else {
         router.push("/projects");
       }
     } catch {
-      toast.error("删除项目失败");
+      // Store already showed a toast; keep the dialog open so the user
+      // can retry after the error.
     } finally {
       setDeleting(false);
     }

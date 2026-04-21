@@ -26,7 +26,7 @@ interface ProjectActions {
   forkProject: (id: string, branchName: string, reason?: string) => Promise<void>;
   fetchVersions: (id: string, signal?: AbortSignal) => Promise<void>;
   fetchRuns: (id: string, signal?: AbortSignal) => Promise<void>;
-  approvePlan: (projectId: string) => Promise<void>;
+  approvePlan: (projectId: string, planId: string) => Promise<void>;
   rejectPlan: (projectId: string, reason: string) => Promise<void>;
 }
 
@@ -73,7 +73,8 @@ export const useProjectStore = create<ProjectState & ProjectActions>((set, get) 
   },
 
   createFromChat: async (data) => {
-    const project = await api.createProjectFromChat(data);
+    const response = await api.createProjectFromChat(data);
+    const project = response.project;
     set((s) => ({ projects: [...s.projects, project] }));
     return project;
   },
@@ -88,6 +89,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>((set, get) 
     } catch (err) {
       logger.error("update project failed", err);
       toast.error("更新项目失败");
+      throw err;
     }
   },
 
@@ -101,6 +103,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>((set, get) 
     } catch (err) {
       logger.error("delete project failed", err);
       toast.error("删除项目失败");
+      throw err;
     }
   },
 
@@ -112,6 +115,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>((set, get) 
     } catch (err) {
       logger.error("fork project failed", err);
       toast.error("分叉项目失败");
+      throw err;
     }
   },
 
@@ -137,9 +141,9 @@ export const useProjectStore = create<ProjectState & ProjectActions>((set, get) 
     }
   },
 
-  approvePlan: async (projectId) => {
+  approvePlan: async (projectId, planId) => {
     try {
-      await api.approvePlan(projectId);
+      await api.approvePlan(planId);
       // Re-fetch project to get updated plan status
       const project = await api.getProject(projectId);
       set({ currentProject: project });
@@ -147,6 +151,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>((set, get) 
     } catch (err) {
       logger.error("approve plan failed", err);
       toast.error("审批计划失败");
+      throw err;
     }
   },
 
@@ -159,6 +164,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>((set, get) 
     } catch (err) {
       logger.error("reject plan failed", err);
       toast.error("拒绝计划失败");
+      throw err;
     }
   },
 }));
