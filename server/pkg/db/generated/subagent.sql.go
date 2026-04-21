@@ -209,6 +209,47 @@ func (q *Queries) ListBundleSubagentRefs(ctx context.Context) ([]ListBundleSubag
 	return items, nil
 }
 
+const listBundleSubagentsForLinking = `-- name: ListBundleSubagentsForLinking :many
+SELECT id, name, source_ref, description, instructions FROM agent
+WHERE kind = 'subagent' AND source = 'bundle' AND source_ref IS NOT NULL
+`
+
+type ListBundleSubagentsForLinkingRow struct {
+	ID           pgtype.UUID `json:"id"`
+	Name         string      `json:"name"`
+	SourceRef    pgtype.Text `json:"source_ref"`
+	Description  string      `json:"description"`
+	Instructions string      `json:"instructions"`
+}
+
+// Full text surfaces the loader scans while inferring subagent_skill
+// links — description + instructions carry the skill mentions.
+func (q *Queries) ListBundleSubagentsForLinking(ctx context.Context) ([]ListBundleSubagentsForLinkingRow, error) {
+	rows, err := q.db.Query(ctx, listBundleSubagentsForLinking)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBundleSubagentsForLinkingRow{}
+	for rows.Next() {
+		var i ListBundleSubagentsForLinkingRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.SourceRef,
+			&i.Description,
+			&i.Instructions,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSkillSubagents = `-- name: ListSkillSubagents :many
 SELECT a.id, a.name, a.category, a.is_global, a.workspace_id
 FROM agent a

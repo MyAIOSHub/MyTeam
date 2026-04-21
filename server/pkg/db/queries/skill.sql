@@ -59,6 +59,14 @@ RETURNING *;
 SELECT id, source_ref FROM skill
 WHERE source = 'bundle' AND source_ref IS NOT NULL;
 
+-- name: ListBundleSkillsForLinking :many
+-- Minimal fields the bundle loader needs to wire subagent_skill rows:
+-- id to insert, name to substring-match, source_ref to group by source
+-- so we never link a subagent to a skill from a different upstream.
+SELECT id, name, source_ref FROM skill
+WHERE source = 'bundle' AND source_ref IS NOT NULL
+ORDER BY name ASC;
+
 -- Removes bundle rows whose source_ref is no longer on disk. The join
 -- table cascades, so linked subagents drop the skill automatically.
 -- name: DeleteBundleSkillsNotInRefs :exec

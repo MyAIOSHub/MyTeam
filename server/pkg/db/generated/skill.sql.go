@@ -356,6 +356,41 @@ func (q *Queries) ListBundleSkillRefs(ctx context.Context) ([]ListBundleSkillRef
 	return items, nil
 }
 
+const listBundleSkillsForLinking = `-- name: ListBundleSkillsForLinking :many
+SELECT id, name, source_ref FROM skill
+WHERE source = 'bundle' AND source_ref IS NOT NULL
+ORDER BY name ASC
+`
+
+type ListBundleSkillsForLinkingRow struct {
+	ID        pgtype.UUID `json:"id"`
+	Name      string      `json:"name"`
+	SourceRef pgtype.Text `json:"source_ref"`
+}
+
+// Minimal fields the bundle loader needs to wire subagent_skill rows:
+// id to insert, name to substring-match, source_ref to group by source
+// so we never link a subagent to a skill from a different upstream.
+func (q *Queries) ListBundleSkillsForLinking(ctx context.Context) ([]ListBundleSkillsForLinkingRow, error) {
+	rows, err := q.db.Query(ctx, listBundleSkillsForLinking)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBundleSkillsForLinkingRow{}
+	for rows.Next() {
+		var i ListBundleSkillsForLinkingRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.SourceRef); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSkillFiles = `-- name: ListSkillFiles :many
 
 SELECT id, skill_id, path, content, created_at, updated_at FROM skill_file

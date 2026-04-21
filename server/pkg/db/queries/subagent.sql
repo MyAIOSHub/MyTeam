@@ -77,6 +77,12 @@ RETURNING
 SELECT id, source_ref FROM agent
 WHERE kind = 'subagent' AND source = 'bundle' AND source_ref IS NOT NULL;
 
+-- name: ListBundleSubagentsForLinking :many
+-- Full text surfaces the loader scans while inferring subagent_skill
+-- links — description + instructions carry the skill mentions.
+SELECT id, name, source_ref, description, instructions FROM agent
+WHERE kind = 'subagent' AND source = 'bundle' AND source_ref IS NOT NULL;
+
 -- name: DeleteBundleSubagentsNotInRefs :exec
 DELETE FROM agent
 WHERE kind = 'subagent'

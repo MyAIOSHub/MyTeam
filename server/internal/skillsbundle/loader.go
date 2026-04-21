@@ -90,6 +90,19 @@ func (l *Loader) Run(ctx context.Context) error {
 		return fmt.Errorf("prune subagents: %w", err)
 	}
 
+	// Wire subagent_skill links so bundle subagents actually hold a
+	// skill roster. Without this pass, every skill is orphaned and
+	// the "agents reach skills only via subagents" rule can't be
+	// enforced end-to-end. The linking is heuristic by design —
+	// upstream bundles don't declare skill/subagent relationships
+	// explicitly, so we infer via skill-name occurrences in the
+	// subagent's description + instructions text, scoped to the
+	// same upstream source.
+	linkCount, err := l.syncSubagentSkillLinks(ctx)
+	if err != nil {
+		return fmt.Errorf("link subagent skills: %w", err)
+	}
+
 	// Re-run the role-agent seed (same logic as migration 074) so any
 	// bundle subagents that just landed on disk get a runnable
 	// workspace agent counterpart. The query's NOT EXISTS guard makes
@@ -102,8 +115,119 @@ func (l *Loader) Run(ctx context.Context) error {
 	slog.Info("skills bundle synced",
 		"skills", len(skillRefs),
 		"subagents", len(subRefs),
+		"skill_links", linkCount,
 	)
 	return nil
+}
+
+// syncSubagentSkillLinks walks the bundle subagents and, for each
+// one, links every same-source skill whose name appears as a token
+// in the subagent's description/instructions. This is intentionally
+// coarse — it'll over-link a chatty subagent that name-drops every
+// skill in its system prompt and under-link a terse one. The product
+// gesture is "subagents come pre-wired with the skills they reference"
+// so users see a meaningful roster out of the box; manual editing via
+// /api/subagents/:id/skills remains the authoritative path for
+// precise curation.
+func (l *Loader) syncSubagentSkillLinks(ctx context.Context) (int, error) {
+	skills, err := l.Queries.ListBundleSkillsForLinking(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list skills: %w", err)
+	}
+	type skillHit struct {
+		id        pgtype.UUID
+		nameLower string
+	}
+	// Group skills by upstream source so the loader never crosses the
+	// addyosmani/superpowers/everything-claude-code boundary.
+	bySource := make(map[string][]skillHit, 4)
+	for _, sk := range skills {
+		if !sk.SourceRef.Valid {
+			continue
+		}
+		src := firstPathSegment(sk.SourceRef.String)
+		bySource[src] = append(bySource[src], skillHit{
+			id:        sk.ID,
+			nameLower: strings.ToLower(strings.TrimSpace(sk.Name)),
+		})
+	}
+
+	subs, err := l.Queries.ListBundleSubagentsForLinking(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list subagents: %w", err)
+	}
+
+	// Track skill coverage and pick a per-source catchall subagent so
+	// we can backfill every orphan skill at the end. Catchall is the
+	// first-seen subagent per source; stable because ListBundle…ForLinking
+	// returns rows in deterministic order.
+	linkedSkills := make(map[string]struct{}, len(skills))
+	catchall := make(map[string]pgtype.UUID, len(bySource))
+	total := 0
+	for _, sa := range subs {
+		if !sa.SourceRef.Valid {
+			continue
+		}
+		src := firstPathSegment(sa.SourceRef.String)
+		if _, ok := catchall[src]; !ok {
+			catchall[src] = sa.ID
+		}
+		candidates := bySource[src]
+		if len(candidates) == 0 {
+			continue
+		}
+		haystack := strings.ToLower(sa.Name + " " + sa.Description + " " + sa.Instructions)
+		pos := int32(0)
+		for _, c := range candidates {
+			if c.nameLower == "" {
+				continue
+			}
+			if !strings.Contains(haystack, c.nameLower) {
+				continue
+			}
+			if err := l.Queries.LinkSubagentSkill(ctx, db.LinkSubagentSkillParams{
+				SubagentID: sa.ID,
+				SkillID:    c.id,
+				Position:   pos,
+			}); err != nil {
+				return total, fmt.Errorf("link %s -> %s: %w", sa.Name, c.nameLower, err)
+			}
+			linkedSkills[uuidKey(c.id)] = struct{}{}
+			pos++
+			total++
+		}
+	}
+
+	// Catchall pass — every orphan skill gets linked to the first
+	// subagent of its source so the product invariant "every skill
+	// is reachable through at least one subagent" holds post-sync.
+	// Users can prune or reassign via the /subagents UI.
+	for _, sk := range skills {
+		if !sk.SourceRef.Valid {
+			continue
+		}
+		if _, hit := linkedSkills[uuidKey(sk.ID)]; hit {
+			continue
+		}
+		src := firstPathSegment(sk.SourceRef.String)
+		owner, ok := catchall[src]
+		if !ok {
+			continue
+		}
+		if err := l.Queries.LinkSubagentSkill(ctx, db.LinkSubagentSkillParams{
+			SubagentID: owner,
+			SkillID:    sk.ID,
+			Position:   999, // tail of the roster so explicit matches sort first
+		}); err != nil {
+			return total, fmt.Errorf("catchall link %s: %w", sk.Name, err)
+		}
+		total++
+	}
+	return total, nil
+}
+
+func uuidKey(u pgtype.UUID) string {
+	return fmt.Sprintf("%x", u.Bytes)
 }
 
 func (l *Loader) syncSkills(ctx context.Context) ([]string, error) {
