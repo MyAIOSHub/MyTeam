@@ -1019,6 +1019,18 @@ export class ApiClient implements ApiTransport {
     await this.fetch(`/api/plans/${planId}/approve`, { method: 'POST' });
   }
 
+  // Phase 3 plan context editor — partial update of input_files +
+  // user_inputs. Pass only the keys you're changing.
+  async updatePlanContext(
+    planId: string,
+    body: { input_files?: unknown[]; user_inputs?: Record<string, unknown> },
+  ): Promise<void> {
+    await this.fetch(`/api/plans/${planId}/context`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
   async rejectPlan(projectId: string, reason: string): Promise<void> {
     await this.fetch(`/api/projects/${projectId}/reject`, { method: 'POST', body: JSON.stringify({ reason }) });
   }

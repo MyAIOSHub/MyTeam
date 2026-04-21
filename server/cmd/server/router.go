@@ -512,6 +512,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Post("/approve", h.ApprovePlan)
 					// Plan 5 §10: Task surface scoped to a plan.
 					r.Get("/tasks", h.ListTasksByPlan)
+					// Phase 3: partial edits to the plan's input_files /
+					// user_inputs context blobs from the 计划 tab.
+					r.Patch("/context", h.UpdatePlanContext)
 				})
 			})
 

@@ -603,6 +603,7 @@ func planValues(p db.Plan) []any {
 		p.Constraints, p.ExpectedOutput, p.CreatedBy, p.CreatedAt, p.UpdatedAt,
 		p.ApprovalStatus, p.ApprovedBy, p.ApprovedAt, p.ProjectID, p.VersionID,
 		p.TaskBrief, p.AssignedAgents, p.RiskPoints, p.ThreadID,
+		p.InputFiles, p.UserInputs,
 	}
 }
 

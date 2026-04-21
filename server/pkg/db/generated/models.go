@@ -588,6 +588,8 @@ type Plan struct {
 	AssignedAgents []byte             `json:"assigned_agents"`
 	RiskPoints     pgtype.Text        `json:"risk_points"`
 	ThreadID       pgtype.UUID        `json:"thread_id"`
+	InputFiles     []byte             `json:"input_files"`
+	UserInputs     []byte             `json:"user_inputs"`
 }
 
 type Project struct {

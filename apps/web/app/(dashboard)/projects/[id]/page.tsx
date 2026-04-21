@@ -640,8 +640,21 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
 
         {/* Tab: 计划 */}
         <TabsContent value="plan" className="space-y-4">
-          {/* 上下文 — chat refs + placeholders for files / user inputs */}
-          <PlanContextSection project={currentProject} plan={plan} />
+          {/* 上下文 — chat refs + editable files / user_inputs (Phase 3) */}
+          <PlanContextSection
+            project={currentProject}
+            plan={plan}
+            editable={planEditable}
+            onPlanUpdated={(updatedPlan) =>
+              useProjectStore.setState((s) =>
+                s.currentProject && s.currentProject.id === currentProject.id
+                  ? {
+                      currentProject: { ...s.currentProject, plan: updatedPlan },
+                    }
+                  : s,
+              )
+            }
+          />
 
           {(plan as any)?.task_brief && (
             <div className="border border-border rounded-lg p-4 bg-card">
@@ -1101,22 +1114,26 @@ function RunSummaryBar({
 
 /* ---------- Plan context section ---------- */
 
-// Renders the plan's input surface — chat refs today, plus slotted
-// placeholders for input_files and user_inputs so the UI is ready to
-// pick up those fields once Phase 3 lands them in the plan row.
+// Renders the plan's input surface — chat refs (project.
+// source_conversations) plus the Phase 3 plan.input_files and
+// plan.user_inputs fields backed by migration 073. The editor is an
+// inline panel that PATCHes /api/plans/{id}/context.
 function PlanContextSection({
   project,
   plan,
+  editable,
+  onPlanUpdated,
 }: {
   project: import("@/shared/types").Project;
   plan: import("@/shared/types").Plan | undefined;
+  editable: boolean;
+  onPlanUpdated: (plan: import("@/shared/types").Plan) => void;
 }) {
   const convs = project.source_conversations ?? [];
-  const files = ((plan as any)?.input_files ?? []) as Array<{
-    id?: string;
-    name?: string;
-  }>;
-  const userInputs = ((plan as any)?.user_inputs ?? {}) as Record<string, unknown>;
+  const files = plan?.input_files ?? [];
+  const userInputs = plan?.user_inputs ?? {};
+  const [editOpen, setEditOpen] = useState(false);
+  const canEdit = Boolean(plan && editable);
 
   const emptyEverywhere =
     convs.length === 0 &&
@@ -1125,13 +1142,25 @@ function PlanContextSection({
 
   return (
     <div className="border border-border rounded-lg bg-card">
-      <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+      <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-2">
         <h3 className="text-sm font-medium">上下文</h3>
-        <span className="text-[11px] text-muted-foreground font-mono">
-          会话 {convs.length} · 文件 {files.length} · 字段 {Object.keys(userInputs).length}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted-foreground font-mono">
+            会话 {convs.length} · 文件 {files.length} · 字段 {Object.keys(userInputs).length}
+          </span>
+          {canEdit && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              onClick={() => setEditOpen((v) => !v)}
+            >
+              {editOpen ? "收起" : "编辑"}
+            </Button>
+          )}
+        </div>
       </div>
-      {emptyEverywhere ? (
+      {emptyEverywhere && !editOpen ? (
         <div className="p-4 text-xs text-muted-foreground">
           尚无上下文。生成计划时选中的消息、附加文件、填写字段都会在此汇总。
         </div>
@@ -1183,6 +1212,11 @@ function PlanContextSection({
                     className="text-xs font-mono text-muted-foreground truncate"
                   >
                     {f.name ?? f.id ?? "file"}
+                    {f.mime && (
+                      <span className="ml-2 text-[10px] text-muted-foreground/60">
+                        {f.mime}
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -1209,6 +1243,200 @@ function PlanContextSection({
           )}
         </div>
       )}
+
+      {editOpen && plan && (
+        <PlanContextEditor
+          plan={plan}
+          onClose={() => setEditOpen(false)}
+          onSaved={(updated) => {
+            onPlanUpdated(updated);
+            setEditOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function PlanContextEditor({
+  plan,
+  onClose,
+  onSaved,
+}: {
+  plan: import("@/shared/types").Plan;
+  onClose: () => void;
+  onSaved: (plan: import("@/shared/types").Plan) => void;
+}) {
+  const [files, setFiles] = useState(() => plan.input_files ?? []);
+  const [inputs, setInputs] = useState<Array<[string, string]>>(() =>
+    Object.entries(plan.user_inputs ?? {}).map(([k, v]) => [
+      k,
+      typeof v === "string" ? v : JSON.stringify(v),
+    ]),
+  );
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const nextInputs: Record<string, string> = {};
+      for (const [k, v] of inputs) {
+        const key = k.trim();
+        if (!key) continue;
+        nextInputs[key] = v;
+      }
+      await api.updatePlanContext(plan.id, {
+        input_files: files.filter((f) => f.id && f.id.trim().length > 0),
+        user_inputs: nextInputs,
+      });
+      onSaved({
+        ...plan,
+        input_files: files,
+        user_inputs: nextInputs,
+      });
+      toast.success("上下文已保存");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-border bg-muted/30 p-4 space-y-4">
+      <section>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[10px] text-muted-foreground/80 font-mono uppercase tracking-wider">
+            附加文件 (file_index id)
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 text-xs"
+            onClick={() =>
+              setFiles((prev) => [...prev, { id: "", name: "" }])
+            }
+          >
+            + 添加
+          </Button>
+        </div>
+        {files.length === 0 ? (
+          <div className="text-xs text-muted-foreground">暂无文件</div>
+        ) : (
+          <div className="space-y-1.5">
+            {files.map((f, i) => (
+              <div key={i} className="flex gap-2">
+                <Input
+                  value={f.id}
+                  onChange={(e) =>
+                    setFiles((prev) =>
+                      prev.map((item, j) =>
+                        j === i ? { ...item, id: e.target.value } : item,
+                      ),
+                    )
+                  }
+                  placeholder="file_index id"
+                  className="font-mono text-xs h-8 flex-1"
+                />
+                <Input
+                  value={f.name ?? ""}
+                  onChange={(e) =>
+                    setFiles((prev) =>
+                      prev.map((item, j) =>
+                        j === i ? { ...item, name: e.target.value } : item,
+                      ),
+                    )
+                  }
+                  placeholder="展示名 (可选)"
+                  className="text-xs h-8 flex-1"
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 px-2"
+                  onClick={() =>
+                    setFiles((prev) => prev.filter((_, j) => j !== i))
+                  }
+                >
+                  ×
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[10px] text-muted-foreground/80 font-mono uppercase tracking-wider">
+            用户填写 (key / value)
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 text-xs"
+            onClick={() => setInputs((prev) => [...prev, ["", ""]])}
+          >
+            + 添加
+          </Button>
+        </div>
+        {inputs.length === 0 ? (
+          <div className="text-xs text-muted-foreground">暂无字段</div>
+        ) : (
+          <div className="space-y-1.5">
+            {inputs.map(([k, v], i) => (
+              <div key={i} className="flex gap-2">
+                <Input
+                  value={k}
+                  onChange={(e) =>
+                    setInputs((prev) =>
+                      prev.map((item, j) =>
+                        j === i ? [e.target.value, item[1]] : item,
+                      ),
+                    )
+                  }
+                  placeholder="key"
+                  className="font-mono text-xs h-8 w-32"
+                />
+                <Input
+                  value={v}
+                  onChange={(e) =>
+                    setInputs((prev) =>
+                      prev.map((item, j) =>
+                        j === i ? [item[0], e.target.value] : item,
+                      ),
+                    )
+                  }
+                  placeholder="value"
+                  className="text-xs h-8 flex-1"
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 px-2"
+                  onClick={() =>
+                    setInputs((prev) => prev.filter((_, j) => j !== i))
+                  }
+                >
+                  ×
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <div className="flex justify-end gap-2">
+        <Button size="sm" variant="outline" onClick={onClose} disabled={saving}>
+          取消
+        </Button>
+        <Button size="sm" onClick={save} disabled={saving}>
+          {saving ? (
+            <Loader2 className="size-3.5 mr-1 animate-spin" />
+          ) : null}
+          保存
+        </Button>
+      </div>
     </div>
   );
 }
