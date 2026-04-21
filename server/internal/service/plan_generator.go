@@ -228,7 +228,14 @@ func parseLLMResponse(text, fallbackInput string, agents []AgentIdentity) (*Gene
 	jsonText := extractJSONObject(text)
 	var raw llmGeneratedPlan
 	if err := json.Unmarshal([]byte(jsonText), &raw); err != nil {
-		slog.Warn("plan generator: failed to parse LLM JSON", "error", err)
+		// Log a truncated preview of what the model actually said so
+		// PLAN_GEN_MALFORMED is diagnosable without a full trace
+		// session. Keep it to 500 chars to avoid bloating logs.
+		slog.Warn("plan generator: failed to parse LLM JSON",
+			"error", err,
+			"raw_preview", truncate(text, 500),
+			"extracted_preview", truncate(jsonText, 500),
+		)
 		return fallbackPlan(fallbackInput, agents), []string{WarnPlanGenMalformed}
 	}
 
@@ -779,25 +786,51 @@ func truncate(s string, n int) string {
 // returns it. Some LLMs wrap their JSON in markdown fences or chatty
 // preamble; this strips those without us having to special-case each
 // failure mode.
+//
+// Brace counting is string-aware: `{` or `}` inside a quoted JSON
+// string no longer confuses the depth counter (was breaking on
+// responses like {"content":"use {foo}"}). Escape sequences are
+// skipped so `"\""` doesn't flip the in-string flag twice.
 func extractJSONObject(s string) string {
 	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "```") {
-		// strip leading fence (```json or ```)
-		if idx := strings.Index(s, "\n"); idx >= 0 {
-			s = s[idx+1:]
+	// Strip leading fence (```json / ``` / ~~~).
+	for _, fence := range []string{"```", "~~~"} {
+		if strings.HasPrefix(s, fence) {
+			if idx := strings.Index(s, "\n"); idx >= 0 {
+				s = s[idx+1:]
+			}
+			if idx := strings.LastIndex(s, fence); idx >= 0 {
+				s = s[:idx]
+			}
+			s = strings.TrimSpace(s)
+			break
 		}
-		if idx := strings.LastIndex(s, "```"); idx >= 0 {
-			s = s[:idx]
-		}
-		s = strings.TrimSpace(s)
 	}
 	start := strings.Index(s, "{")
 	if start < 0 {
 		return s
 	}
 	depth := 0
+	inString := false
+	escape := false
 	for i := start; i < len(s); i++ {
-		switch s[i] {
+		c := s[i]
+		if escape {
+			escape = false
+			continue
+		}
+		if inString {
+			switch c {
+			case '\\':
+				escape = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
 		case '{':
 			depth++
 		case '}':
