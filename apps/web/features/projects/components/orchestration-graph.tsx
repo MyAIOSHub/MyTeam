@@ -37,16 +37,20 @@ interface GraphEdge {
 }
 
 // ProjectSummary feeds the always-on overview block at the bottom of
-// the inspector pane. It replaces the old Slots tab — instead of a
-// full sub-page of slot rows, the right pane shows progress / status /
-// completion info that used to live there, and drills into per-task
-// IO only when the user selects a node/edge.
+// the inspector pane. The block replaces the old Slots tab — instead
+// of a full sub-page of slot rows, the right pane shows progress /
+// status / completion.
+//
+// Scope is driven by the current graph selection:
+//   - No selection (or creator node) → whole-project stats.
+//   - Agent / subagent node selected → stats filtered to tasks owned
+//     by that node.
+//   - Edge selected → stats for the single task on that edge.
+// The parent passes base project info (title / runStatus / thread);
+// the component derives counts from `tasks` + selection.
 export interface ProjectSummary {
   title?: string;
   status?: string;
-  progressPct: number;       // 0..100, derived by caller
-  completedCount: number;
-  totalCount: number;
   runStatus?: string;
   channelId?: string | null;
   threadId?: string | null;
@@ -330,31 +334,101 @@ export function OrchestrationGraph({
           )}
         </div>
         {projectSummary && (
-          <ProjectSummaryBlock summary={projectSummary} />
+          <ProjectSummaryBlock
+            summary={projectSummary}
+            scope={summaryScope({
+              selectedNode,
+              selectedEdge,
+              tasks,
+            })}
+          />
         )}
       </aside>
     </div>
   );
 }
 
-function ProjectSummaryBlock({ summary }: { summary: ProjectSummary }) {
-  const pct = Math.max(0, Math.min(100, Math.round(summary.progressPct)));
+// summaryScope resolves the set of tasks the overview block should
+// aggregate given the current selection.
+//   - Node (agent / subagent) → tasks where the node is the assignee.
+//   - Edge → single task referenced by that edge.
+//   - No selection / creator → whole project.
+// The label in the block header mirrors the scope so the user always
+// knows what the percentage refers to.
+function summaryScope({
+  selectedNode,
+  selectedEdge,
+  tasks,
+}: {
+  selectedNode: GraphNode | null | undefined;
+  selectedEdge: GraphEdge | null | undefined;
+  tasks: Task[];
+}): { label: string; tasks: Task[] } {
+  if (selectedEdge) {
+    const t = tasks.find((x) => x.id === selectedEdge.taskId);
+    return {
+      label: `任务执行情况 · ${t?.title ?? "?"}`,
+      tasks: t ? [t] : [],
+    };
+  }
+  if (selectedNode && selectedNode.id !== CREATOR_ID) {
+    const owned = tasks.filter(
+      (t) => (t.actual_agent_id ?? t.primary_assignee_id) === selectedNode.id,
+    );
+    return {
+      label: `${selectedNode.label} · 执行情况`,
+      tasks: owned,
+    };
+  }
+  return { label: "整体执行情况", tasks };
+}
+
+function ProjectSummaryBlock({
+  summary,
+  scope,
+}: {
+  summary: ProjectSummary;
+  scope: { label: string; tasks: Task[] };
+}) {
+  const completed = scope.tasks.filter((t) => t.status === "completed").length;
+  const total = scope.tasks.length;
+  const pct = total === 0 ? 0 : Math.round((completed / total) * 100);
+
+  // Per-scope state: aggregate task statuses when we're scoped to an
+  // agent; otherwise fall back to the caller-provided runStatus so the
+  // whole-project view still reflects active_run.status.
+  const scopedStatus =
+    total === 0
+      ? summary.runStatus
+      : scope.tasks.some(
+            (t) => t.status === "running" || t.status === "assigned",
+          )
+        ? "running"
+        : scope.tasks.every((t) => t.status === "completed")
+          ? "completed"
+          : scope.tasks.some((t) => t.status === "failed")
+            ? "failed"
+            : summary.runStatus;
+
   const stateClass =
-    summary.runStatus === "running"
+    scopedStatus === "running"
       ? "text-[#d9775e]"
-      : summary.runStatus === "completed"
+      : scopedStatus === "completed"
         ? "text-[#4ade80]"
-        : summary.runStatus === "failed"
+        : scopedStatus === "failed"
           ? "text-destructive"
           : "text-muted-foreground";
   return (
     <div className="border-t border-border bg-card/60 p-3 space-y-2 shrink-0">
       <div className="flex items-center justify-between">
-        <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
-          项目概览
+        <div
+          className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground truncate"
+          title={scope.label}
+        >
+          {scope.label}
         </div>
         <span className={"text-[11px] font-medium " + stateClass}>
-          {projectStatusLabel(summary.runStatus ?? summary.status)}
+          {projectStatusLabel(scopedStatus ?? summary.status)}
         </span>
       </div>
       {summary.title && (
@@ -366,7 +440,7 @@ function ProjectSummaryBlock({ summary }: { summary: ProjectSummary }) {
         <div className="flex items-center justify-between text-[11px] text-muted-foreground">
           <span>进度</span>
           <span className="font-mono">
-            {summary.completedCount}/{summary.totalCount}
+            {completed}/{total}
           </span>
         </div>
         <div className="h-1.5 rounded-full bg-muted overflow-hidden">

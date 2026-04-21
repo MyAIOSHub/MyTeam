@@ -805,17 +805,6 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
                     title: currentProject.title,
                     status: currentProject.status,
                     runStatus: activeRun?.status,
-                    completedCount: sortedTasks.filter(
-                      (t) => t.status === "completed",
-                    ).length,
-                    totalCount: sortedTasks.length,
-                    progressPct:
-                      sortedTasks.length === 0
-                        ? 0
-                        : (sortedTasks.filter((t) => t.status === "completed")
-                            .length /
-                            sortedTasks.length) *
-                          100,
                     channelId: currentProject.channel_id,
                     threadId: (plan as any)?.thread_id ?? null,
                     onOpenThread:
