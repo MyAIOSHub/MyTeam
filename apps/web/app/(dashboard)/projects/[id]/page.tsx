@@ -12,15 +12,14 @@ import {
   X as XIcon,
   ListTodo,
   Trash2,
+  Hash,
 } from "lucide-react";
 import { useProjectStore } from "@/features/projects";
 import { useWorkspaceStore } from "@/features/workspace";
-import { VersionTree } from "@/features/projects/components/version-tree";
 import { ExecutionStepCard } from "@/features/projects/components/execution-step-card";
 import { OrchestrationGraph } from "@/features/projects/components/orchestration-graph";
 import { OrchestrationDAG } from "@/features/projects/components/orchestration-dag";
 import { PlanStepper } from "@/features/projects/components/plan-stepper";
-import { MessageInput } from "@/features/messaging/components/message-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,7 +44,6 @@ import type {
   ParticipantSlot,
   Artifact,
 } from "@/shared/types";
-import type { Message } from "@/shared/types/messaging";
 
 const STATUS_BADGE: Record<ProjectStatus, string> = {
   not_started: "bg-accent text-muted-foreground border-border",
@@ -146,9 +144,6 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
   const [rejectReason, setRejectReason] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-
-  // Channel messages for channel tab
-  const [channelMessages, setChannelMessages] = useState<Message[]>([]);
 
   // Project tasks (from /api/plans/{id}/tasks). Drives Plan / Tasks /
   // Board / Execution tabs — migration 059 removed the legacy Plan.steps
@@ -258,22 +253,6 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
       setTitleValue(currentProject.title);
     }
   }, [currentProject]);
-
-  const channelId = currentProject?.channel_id ?? null;
-  useEffect(() => {
-    setChannelMessages([]);
-  }, [channelId]);
-
-  const channelPollError = useRetryingPoll({
-    enabled: Boolean(channelId),
-    fallbackError: "加载项目频道消息失败",
-    resetKey: channelId ?? "no-channel",
-    poll: useCallback(async () => {
-      if (!channelId) return;
-      const res = await api.getChannelMessages(channelId);
-      setChannelMessages(res.messages);
-    }, [channelId]),
-  });
 
   const activeRun = currentProject?.active_run;
   const isExecutionPollingActive =
@@ -442,19 +421,6 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
     }
   }
 
-  async function handleSendChannelMessage(content: string) {
-    if (!currentProject?.channel_id) return;
-    try {
-      const msg = await api.sendMessage({
-        channel_id: currentProject.channel_id,
-        content,
-      });
-      setChannelMessages((prev) => [...prev, msg]);
-    } catch {
-      toast.error("发送消息失败");
-    }
-  }
-
   if (loading) {
     return (
       <div className="flex items-center justify-center flex-1 py-20">
@@ -487,7 +453,6 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
   const approvalLabel =
     approvalStatus === "draft" ? "草稿" : "待审批";
   const pollingErrors = [
-    channelPollError.error ? `频道：${channelPollError.error}` : null,
     executionPollError.error ? `执行：${executionPollError.error}` : null,
   ].filter(Boolean) as string[];
 
@@ -498,6 +463,18 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
 
   const hasPlan = Boolean(plan);
   const hasTasks = sortedTasks.length > 0;
+
+  // Project version surfaced inline after the title. Initial project
+  // state is implicit v1.0; each fork bumps the major by 1. The next
+  // suggestion for the fork dialog is latest + 1.
+  const latestVersionNumber = versions.reduce(
+    (max, v) => Math.max(max, v.version_number ?? 0),
+    0,
+  );
+  const currentVersionNumber = latestVersionNumber || 1;
+  const versionLabel = `v${currentVersionNumber}.0`;
+  const nextVersionNumber = latestVersionNumber + 1;
+  const nextVersionLabel = `v${nextVersionNumber}.0`;
 
   // Edit gate for the plan stepper. Inline field edits (A) are cheap
   // and safe, so we allow them any time a run isn't actively touching
@@ -568,12 +545,17 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
               </Button>
             </div>
           ) : (
-            <h1
-              className="text-2xl font-semibold truncate cursor-pointer hover:text-primary/80"
-              onClick={() => setEditingTitle(true)}
-            >
-              {currentProject.title}
-            </h1>
+            <div className="flex items-baseline gap-3 min-w-0">
+              <h1
+                className="text-2xl font-semibold truncate cursor-pointer hover:text-primary/80"
+                onClick={() => setEditingTitle(true)}
+              >
+                {currentProject.title}
+              </h1>
+              <span className="text-sm text-muted-foreground font-mono shrink-0">
+                {versionLabel}
+              </span>
+            </div>
           )}
           <div className="flex items-center gap-2 mt-1">
             <Badge
@@ -597,7 +579,27 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setForkOpen(true)}>
+          {currentProject.channel_id && (
+            <Button
+              variant="outline"
+              onClick={() =>
+                router.push(
+                  `/session?id=${currentProject.channel_id}&type=channel`,
+                )
+              }
+            >
+              <Hash className="size-4 mr-1" />
+              频道
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            onClick={() => {
+              setForkBranch(nextVersionLabel);
+              setForkReason("");
+              setForkOpen(true);
+            }}
+          >
             <GitFork className="size-4 mr-1" />
             分叉
           </Button>
@@ -612,31 +614,17 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
         </div>
       </div>
 
-      {/* Tabs — 版本/计划/任务/Slots/结果/频道. 看板 folded into 任务
-          view toggle; 执行 folded into 结果. */}
+      {/* Tabs — 计划/任务/Slots/结果. 版本 moved inline next to the
+          title; 频道 became a header button that jumps to the
+          session channel; 看板 folded into 任务; 执行 folded into
+          结果. */}
       <Tabs defaultValue="plan" className="flex flex-col flex-1 min-h-0">
         <TabsList>
-          <TabsTrigger value="versions">版本</TabsTrigger>
           <TabsTrigger value="plan">计划</TabsTrigger>
           <TabsTrigger value="tasks">任务</TabsTrigger>
           <TabsTrigger value="slots">Slots</TabsTrigger>
           <TabsTrigger value="results">结果</TabsTrigger>
-          <TabsTrigger value="channel">频道</TabsTrigger>
         </TabsList>
-
-        {/* Tab: 版本 */}
-        <TabsContent value="versions" className="space-y-3">
-          {versions.length > 0 ? (
-            <div className="border border-border rounded-lg p-4 bg-card">
-              <h3 className="text-sm font-medium mb-3">版本树</h3>
-              <VersionTree versions={versions} onSelect={() => {}} />
-            </div>
-          ) : (
-            <div className="text-sm text-muted-foreground border border-dashed rounded-lg p-6 text-center">
-              暂无版本记录，使用右上角“分叉”创建第一个版本。
-            </div>
-          )}
-        </TabsContent>
 
         {/* Tab: 计划 */}
         <TabsContent value="plan" className="space-y-4">
@@ -911,45 +899,10 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
           )}
         </TabsContent>
 
-        {/* Tab 5: Channel */}
-        <TabsContent value="channel">
-          {currentProject.channel_id ? (
-            <div
-              className="flex flex-col border border-border rounded-lg"
-              style={{ height: "500px" }}
-            >
-              <div className="p-3 border-b border-border">
-                <h3 className="font-medium text-sm text-foreground">项目频道</h3>
-              </div>
-              <div className="flex-1 overflow-auto p-4 space-y-3">
-                {channelMessages.map((msg) => (
-                  <div key={msg.id} className="flex justify-start">
-                    <div className="max-w-[70%] px-4 py-2 rounded-lg text-sm bg-accent">
-                      <div className="text-xs opacity-70 mb-1">
-                        {msg.sender_id?.slice(0, 12)} ·{" "}
-                        {new Date(msg.created_at).toLocaleTimeString()}
-                      </div>
-                      <div>{msg.content}</div>
-                    </div>
-                  </div>
-                ))}
-                {channelMessages.length === 0 && (
-                  <div className="text-center text-muted-foreground mt-8">
-                    暂无消息
-                  </div>
-                )}
-              </div>
-              <MessageInput
-                onSend={handleSendChannelMessage}
-                placeholder="发送消息到项目频道..."
-              />
-            </div>
-          ) : (
-            <div className="text-center py-12 text-muted-foreground">
-              <p>该项目暂无关联频道</p>
-            </div>
-          )}
-        </TabsContent>
+        {/* 频道 was promoted to a header button that jumps to the
+            session view — the inline embed doubled every message up
+            against the dedicated chat UI, so we drop the tab body
+            entirely. */}
       </Tabs>
 
       {/* Fork Dialog */}
