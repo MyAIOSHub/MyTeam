@@ -65,12 +65,20 @@ func NewS3StorageFromEnv() *S3Storage {
 
 	var client *s3.Client
 	if endpoint != "" {
-		// MinIO / localstack / custom S3-compatible endpoint
+		// MinIO / localstack / custom S3-compatible endpoint.
+		// Path-style is right for MinIO / LocalStack but wrong for
+		// Volcengine TOS (returns 403 InvalidPathAccess). Default to
+		// path-style for backwards compatibility; set S3_USE_PATH_STYLE=false
+		// in .env for TOS.
+		usePathStyle := true
+		if v := os.Getenv("S3_USE_PATH_STYLE"); v != "" {
+			usePathStyle = v == "true" || v == "1" || v == "yes"
+		}
 		client = s3.NewFromConfig(cfg, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(endpoint)
-			o.UsePathStyle = true // MinIO requires path-style
+			o.UsePathStyle = usePathStyle
 		})
-		slog.Info("S3 storage initialized (custom endpoint)", "bucket", bucket, "endpoint", endpoint)
+		slog.Info("S3 storage initialized (custom endpoint)", "bucket", bucket, "endpoint", endpoint, "path_style", usePathStyle)
 	} else {
 		client = s3.NewFromConfig(cfg)
 		slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain)
