@@ -52,9 +52,13 @@ const STATE_RING: Record<GraphNode["state"], string> = {
   failed: "rgba(239,68,68,0.35)",
 };
 
+// Concrete colors — SVG attribute fill/stroke do not evaluate CSS
+// custom properties, so referencing shadcn theme tokens here fell
+// back to black and painted the label pills as solid bars on the
+// canvas. Palette picked to read against the beige app background.
 const EDGE_COLOR: Record<EdgeKind, string> = {
-  task: "hsl(var(--primary))",
-  review: "hsl(var(--warning, 38 92% 50%))",
+  task: "#d9775e",
+  review: "#f0b440",
   signal: "#4ade80",
 };
 
@@ -228,7 +232,7 @@ export function OrchestrationGraph({
                   width={80}
                   height={18}
                   rx={9}
-                  fill="hsl(var(--card))"
+                  fill="#fffdf8"
                   stroke={color}
                   strokeOpacity={0.4}
                 />

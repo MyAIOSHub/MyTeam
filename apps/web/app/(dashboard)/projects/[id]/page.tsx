@@ -823,21 +823,29 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
               )}
 
               {taskView === "board" && (
-                <div className="grid grid-cols-5 gap-3 min-h-0">
+                // Bounded height + overflow on the grid so a column
+                // full of long-titled cards doesn't push the page
+                // below the viewport. Each column scrolls its own
+                // body; the grid itself allows horizontal scroll when
+                // 5 columns can't fit on narrow windows.
+                <div
+                  className="grid grid-cols-5 gap-3 overflow-x-auto"
+                  style={{ maxHeight: "calc(100vh - 320px)" }}
+                >
                   {BOARD_COLUMNS.map((col) => {
                     const items = tasksByColumn[col.key] ?? [];
                     return (
                       <div
                         key={col.key}
-                        className="flex flex-col border border-border rounded-lg bg-card overflow-hidden"
+                        className="flex flex-col border border-border rounded-lg bg-card overflow-hidden min-w-[220px]"
                       >
-                        <div className="px-3 py-2 border-b border-border flex items-center justify-between">
+                        <div className="px-3 py-2 border-b border-border flex items-center justify-between shrink-0">
                           <span className="text-sm font-medium">{col.label}</span>
                           <span className="text-xs text-muted-foreground">
                             {items.length}
                           </span>
                         </div>
-                        <div className="flex-1 p-2 space-y-2 overflow-y-auto">
+                        <div className="flex-1 min-h-0 p-2 space-y-2 overflow-y-auto">
                           {items.length === 0 ? (
                             <div className="text-xs text-muted-foreground/60 text-center py-3">
                               空

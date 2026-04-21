@@ -124,7 +124,9 @@ export function ExecutionStepCard({
                 : step.step_order}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="font-medium text-sm">{step.description ?? step.title}</div>
+            <div className="font-medium text-sm break-words line-clamp-3">
+              {step.description ?? step.title}
+            </div>
             <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-muted-foreground">
               {/* Agent */}
               <span className="inline-flex items-center gap-1">

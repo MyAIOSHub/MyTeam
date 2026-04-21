@@ -54,11 +54,14 @@ export function OrchestrationDAG({
   return (
     <div className="flex-1 border border-border rounded-lg bg-card overflow-auto">
       <svg width={svgWidth} height={svgHeight} className="block">
+        {/* Concrete edge/arrow color — SVG attribute fill/stroke
+            don't resolve CSS custom properties, so referencing the
+            theme token directly was painting everything black. */}
         {layout.edges.map((e, i) => (
           <path
             key={i}
             d={orthogonalPath(e.from, e.to)}
-            stroke="hsl(var(--primary))"
+            stroke="#d9775e"
             strokeWidth={e.done ? 1.6 : 1.2}
             strokeDasharray={e.done || e.active ? "none" : "4 4"}
             opacity={e.active ? 0.9 : e.done ? 0.6 : 0.4}
@@ -76,7 +79,7 @@ export function OrchestrationDAG({
             markerHeight="6"
             orient="auto"
           >
-            <path d="M0,0 L10,5 L0,10 z" fill="hsl(var(--primary))" />
+            <path d="M0,0 L10,5 L0,10 z" fill="#d9775e" />
           </marker>
         </defs>
         {layout.nodes.map((n) => (
@@ -223,16 +226,18 @@ function DAGNode({
   const subagent = subagents.find((s) => s.id === assigneeId);
   const assigneeName =
     agent?.name ?? subagent?.name ?? (assigneeId ? assigneeId.slice(0, 8) : "未分配");
+  // Use concrete colors because SVG attribute fill/stroke don't
+  // evaluate CSS variables — the theme tokens would fall back to
+  // black and paint every node as a solid block. Keep the palette
+  // aligned with the shadcn neutral theme we use elsewhere.
   const fill = task.status === "failed"
-    ? "rgba(239,68,68,0.08)"
+    ? "rgba(239,68,68,0.10)"
     : task.status === "completed"
-      ? "rgba(74,222,128,0.08)"
+      ? "rgba(74,222,128,0.12)"
       : task.status === "running" || task.status === "assigned"
-        ? "rgba(94,106,210,0.08)"
-        : "hsl(var(--card))";
-  const stroke = selected
-    ? "hsl(var(--primary))"
-    : "hsl(var(--border))";
+        ? "rgba(94,106,210,0.12)"
+        : "#fffdf8";
+  const stroke = selected ? "#d9775e" : "#e5d9c4";
 
   return (
     <g
