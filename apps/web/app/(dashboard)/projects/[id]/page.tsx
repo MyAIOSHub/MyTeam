@@ -36,6 +36,7 @@ import type {
   ProjectStatus,
   ProjectRun,
   Agent,
+  Subagent,
   Task,
   TaskStatus,
 } from "@/shared/types";
@@ -148,9 +149,29 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
   // Board / Execution tabs — migration 059 removed the legacy Plan.steps
   // column so everything flows from Task rows now.
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [subagents, setSubagents] = useState<Subagent[]>([]);
   const [startingExecution, setStartingExecution] = useState(false);
 
   const agents = useWorkspaceStore((s) => s.agents) as Agent[];
+
+  // Subagents are fetched once and reused across all ExecutionStepCard
+  // renders so the assignee name resolves when PlanGenerator's default-
+  // assign picks a subagent template. Kept separate from the workspace
+  // store because the subagent pool includes globals.
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .listSubagents()
+      .then((list) => {
+        if (!cancelled) setSubagents(list);
+      })
+      .catch(() => {
+        // Non-fatal: cards fall back to truncated UUID.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -572,7 +593,7 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
             ) : (
               <div className="space-y-3">
                 {sortedTasks.map((t) => (
-                  <ExecutionStepCard key={t.id} step={t} agents={agents} />
+                  <ExecutionStepCard key={t.id} step={t} agents={agents} subagents={subagents} />
                 ))}
               </div>
             )}
@@ -657,7 +678,7 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
           ) : (
             <div className="space-y-3">
               {sortedTasks.map((t) => (
-                <ExecutionStepCard key={t.id} step={t} agents={agents} />
+                <ExecutionStepCard key={t.id} step={t} agents={agents} subagents={subagents} />
               ))}
             </div>
           )}
@@ -696,6 +717,7 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
                             key={t.id}
                             step={t}
                             agents={agents}
+                            subagents={subagents}
                           />
                         ))
                       )}
@@ -720,6 +742,7 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
                       key={step.id}
                       step={step}
                       agents={agents}
+                      subagents={subagents}
                     />
                   ))
                 ) : (

@@ -326,17 +326,80 @@ func parseLLMResponse(text, fallbackInput string, agents []AgentIdentity) (*Gene
 
 // validate runs soft validation on the result and appends warnings.
 // It never strips tasks/slots — the goal is "always have something
-// usable, but tell the caller what looks off".
+// usable, but tell the caller what looks off". It also backfills any
+// task whose primary_assignee the LLM left blank so the UI never
+// shows "未分配" unless the workspace truly has no candidates.
 func (s *PlanGeneratorService) validate(res *GeneratePlanResult, agents []AgentIdentity, subagents []SubagentIdentity) *GeneratePlanResult {
 	if res == nil {
 		return res
 	}
+	applyDefaultAssignees(res.Tasks, agents, subagents)
 	res.Warnings = appendUnique(res.Warnings, validateSlotTaskRefs(res.Tasks, res.Slots)...)
 	res.Warnings = appendUnique(res.Warnings, validateDAG(res.Tasks)...)
 	res.Warnings = appendUnique(res.Warnings, validateCollabModeSlotComposition(res.Tasks, res.Slots)...)
 	res.Warnings = appendUnique(res.Warnings, validateSkillCoverage(res.Tasks, agents)...)
 	res.Warnings = appendUnique(res.Warnings, validateSkillSubagent(res.Tasks, subagents)...)
 	return res
+}
+
+// applyDefaultAssignees guarantees every TaskDraft has a
+// primary_assignee_agent_id when any candidate exists. Rule:
+//
+//  1. Tasks with required_skills prefer a subagent whose skill roster
+//     covers at least one required skill, then fall back to the first
+//     subagent, then the first agent.
+//  2. Skill-less tasks prefer the first agent (human operator taking
+//     the lead) and fall back to the first subagent.
+//
+// The function is in-place on the slice; tasks the LLM already assigned
+// are left alone so the model's decision wins when it made one.
+func applyDefaultAssignees(tasks []TaskDraft, agents []AgentIdentity, subagents []SubagentIdentity) {
+	if len(agents) == 0 && len(subagents) == 0 {
+		return
+	}
+	skillToSubagent := make(map[string]string, len(subagents)*4)
+	for _, sa := range subagents {
+		for _, sk := range sa.Skills {
+			if _, exists := skillToSubagent[sk]; !exists {
+				skillToSubagent[sk] = sa.ID
+			}
+		}
+	}
+	firstSubagent := ""
+	if len(subagents) > 0 {
+		firstSubagent = subagents[0].ID
+	}
+	firstAgent := ""
+	if len(agents) > 0 {
+		firstAgent = agents[0].ID
+	}
+	for i := range tasks {
+		if strings.TrimSpace(tasks[i].PrimaryAssigneeAgentID) != "" {
+			continue
+		}
+		if len(tasks[i].RequiredSkills) > 0 {
+			picked := ""
+			for _, sk := range tasks[i].RequiredSkills {
+				if id, ok := skillToSubagent[sk]; ok {
+					picked = id
+					break
+				}
+			}
+			if picked == "" {
+				picked = firstChoice(firstSubagent, firstAgent)
+			}
+			tasks[i].PrimaryAssigneeAgentID = picked
+			continue
+		}
+		tasks[i].PrimaryAssigneeAgentID = firstChoice(firstAgent, firstSubagent)
+	}
+}
+
+func firstChoice(primary, fallback string) string {
+	if primary != "" {
+		return primary
+	}
+	return fallback
 }
 
 // validateSkillSubagent enforces the post-069 rule that any task whose
