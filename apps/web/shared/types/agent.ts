@@ -174,7 +174,6 @@ export interface UpdateSubagentRequest {
 // pull via `/api/agents/:id/inbox`.
 export interface AgentInteraction {
   id: string;
-  workspace_id?: string;
   from_id: string;
   from_type: "agent" | "user";
   target: {

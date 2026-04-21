@@ -246,3 +246,17 @@ func (q *Queries) MarkAgentInteractionRead(ctx context.Context, id pgtype.UUID) 
 	_, err := q.db.Exec(ctx, markAgentInteractionRead, id)
 	return err
 }
+
+const markAgentInteractionsDelivered = `-- name: MarkAgentInteractionsDelivered :exec
+UPDATE agent_interaction
+SET status       = 'delivered',
+    delivered_at = now()
+WHERE id = ANY($1::uuid[]) AND status = 'pending'
+`
+
+// Bulk variant used by the inbox GET so we don't fire N UPDATEs per
+// page read. Ignores rows already past 'pending' (idempotent).
+func (q *Queries) MarkAgentInteractionsDelivered(ctx context.Context, ids []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markAgentInteractionsDelivered, ids)
+	return err
+}

@@ -94,9 +94,13 @@ type interactionTarget struct {
 	SessionID  string `json:"session_id,omitempty"`
 }
 
+// interactionResponse is the wire shape returned to clients. It
+// intentionally omits workspace_id — that field is server-side scoping
+// only and the receiver already knows what workspace they're in via
+// their own session. Surfacing it leaked the sender's workspace once
+// cross-workspace validation landed.
 type interactionResponse struct {
 	ID          string          `json:"id"`
-	WorkspaceID string          `json:"workspace_id,omitempty"`
 	FromID      string          `json:"from_id"`
 	FromType    string          `json:"from_type"`
 	Target      map[string]any  `json:"target"`
@@ -134,6 +138,15 @@ func (h *Handler) SendInteraction(w http.ResponseWriter, r *http.Request) {
 	if req.ContentType == "" {
 		req.ContentType = "text"
 	}
+	// content_type='json' claims the payload is a JSON document — reject
+	// garbage early rather than letting receivers hit a parse error.
+	if req.ContentType == "json" && len(req.Payload) > 0 {
+		var probe any
+		if err := json.Unmarshal(req.Payload, &probe); err != nil {
+			writeError(w, http.StatusBadRequest, "payload is not valid JSON")
+			return
+		}
+	}
 
 	// Exactly-one-of target rule enforced at the handler so callers
 	// get a readable 400 rather than NULL-constraint errors.
@@ -159,12 +172,16 @@ func (h *Handler) SendInteraction(w http.ResponseWriter, r *http.Request) {
 	// agent" — resolveActor already checked the agent lives in this
 	// workspace, but that isn't enough: anyone in the workspace could
 	// otherwise claim to be any agent. Re-check via canActAsAgent.
+	// resolveActor returns 'member' for humans; the DB check constraint
+	// uses 'user', so translate.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	if actorType == "agent" {
 		if !h.CanActAsAgent(r.Context(), userID, actorID, workspaceID) {
 			writeError(w, http.StatusForbidden, "not allowed to send as this agent")
 			return
 		}
+	} else {
+		actorType = "user"
 	}
 
 	// Target validation — every reachable target must live in the
@@ -324,11 +341,20 @@ func (h *Handler) GetAgentInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := make([]interactionResponse, 0, len(rows))
+	pending := make([]pgtype.UUID, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, interactionRow(row))
-		// Mark as delivered on read — pull-fallback ack. Explicit
-		// /ack endpoint still supports read-later semantics.
-		_ = h.Queries.MarkAgentInteractionDelivered(r.Context(), row.ID)
+		if row.Status == "pending" {
+			pending = append(pending, row.ID)
+		}
+	}
+	// Bulk mark-delivered — one UPDATE per page instead of N. Best-
+	// effort: failure just leaves rows at 'pending' so the next poll
+	// retries naturally.
+	if len(pending) > 0 {
+		if err := h.Queries.MarkAgentInteractionsDelivered(r.Context(), pending); err != nil {
+			slog.Warn("bulk mark delivered", "error", err)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -435,7 +461,6 @@ func interactionRow(row db.AgentInteraction) interactionResponse {
 
 	return interactionResponse{
 		ID:          uuidToString(row.ID),
-		WorkspaceID: uuidToString(row.WorkspaceID),
 		FromID:      uuidToString(row.FromID),
 		FromType:    row.FromType,
 		Target:      target,

@@ -43,6 +43,14 @@ SET status       = 'delivered',
     delivered_at = now()
 WHERE id = $1 AND status = 'pending';
 
+-- Bulk variant used by the inbox GET so we don't fire N UPDATEs per
+-- page read. Ignores rows already past 'pending' (idempotent).
+-- name: MarkAgentInteractionsDelivered :exec
+UPDATE agent_interaction
+SET status       = 'delivered',
+    delivered_at = now()
+WHERE id = ANY(@ids::uuid[]) AND status = 'pending';
+
 -- name: MarkAgentInteractionRead :exec
 UPDATE agent_interaction
 SET status  = 'read',
