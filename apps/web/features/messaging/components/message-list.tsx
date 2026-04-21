@@ -1,8 +1,11 @@
 "use client";
-import { Check, MessageSquare } from "lucide-react";
+import { Check, CheckCheck, MessageSquare } from "lucide-react";
 
 import { useMessageSelectionStore } from "@/features/messaging/stores/selection-store";
 import { useWorkspaceStore } from "@/features/workspace";
+import { MemoizedMarkdown } from "@/components/markdown";
+
+type MessageStatus = "sent" | "delivered" | "read";
 
 interface MessageListProps {
   messages: Array<{
@@ -15,6 +18,7 @@ interface MessageListProps {
     file_id?: string;
     reply_count?: number;
     is_impersonated?: boolean;
+    status?: MessageStatus;
   }>;
   currentUserId?: string;
   onOpenThread?: (messageId: string) => void;
@@ -23,6 +27,33 @@ interface MessageListProps {
   // subset to feed into "Generate Project from selection". Owned by the
   // session page; this component just reflects the parent's intent.
   selectionEnabled?: boolean;
+}
+
+// MessageStatusIndicator renders sent / delivered / read icons on the
+// current user's own messages only. Follows the WhatsApp convention:
+// single tick = sent, double tick grey = delivered, double tick colored
+// = read.
+function MessageStatusIndicator({ status }: { status?: MessageStatus }) {
+  if (!status) return null;
+  if (status === "read") {
+    return (
+      <span title="已读" className="inline-flex items-center text-primary">
+        <CheckCheck className="h-3 w-3" />
+      </span>
+    );
+  }
+  if (status === "delivered") {
+    return (
+      <span title="已送达" className="inline-flex items-center text-muted-foreground">
+        <CheckCheck className="h-3 w-3" />
+      </span>
+    );
+  }
+  return (
+    <span title="已发送" className="inline-flex items-center text-muted-foreground">
+      <Check className="h-3 w-3" />
+    </span>
+  );
 }
 
 export function MessageList({ messages, currentUserId, onOpenThread, typingUsers = [], selectionEnabled = false }: MessageListProps) {
@@ -83,8 +114,21 @@ export function MessageList({ messages, currentUserId, onOpenThread, typingUsers
                 </span>
               </div>
 
-              {/* Content */}
-              <div className="text-[14px] text-foreground leading-relaxed">{msg.content}</div>
+              {/* Content — markdown rendered so agents can return
+                  headings / code blocks / lists and they display
+                  properly rather than as a wall of raw '##' text. */}
+              <div className="text-[14px] text-foreground leading-relaxed prose prose-sm max-w-none dark:prose-invert">
+                <MemoizedMarkdown mode="minimal">{msg.content}</MemoizedMarkdown>
+              </div>
+
+              {/* Read/delivered status — only shown on messages the current
+                  user sent, so the recipient doesn't see ticks next to
+                  their own bubbles. */}
+              {currentUserId === msg.sender_id && (
+                <div className="mt-0.5 flex justify-end">
+                  <MessageStatusIndicator status={msg.status} />
+                </div>
+              )}
 
               {/* File attachment */}
               {msg.file_name && (

@@ -104,6 +104,24 @@ vi.mock("@/features/messaging/components/promote-to-channel-button", () => ({
   PromoteToChannelButton: () => null,
 }));
 
+vi.mock("@/features/messaging/components/invite-channel-member-dialog", () => ({
+  InviteChannelMemberDialog: () => null,
+}));
+
+vi.mock("@/features/messaging/stores/archive-store", () => ({
+  useConversationArchiveStore: (selector: (s: any) => any) =>
+    selector({
+      archivedKeys: new Set<string>(),
+      fetch: vi.fn(),
+      archive: vi.fn(),
+      unarchive: vi.fn(),
+    }),
+}));
+
+vi.mock("@/features/messaging/hooks/use-typing-indicator", () => ({
+  useTypingIndicator: () => ({ typingUsers: [], sendTyping: vi.fn() }),
+}));
+
 vi.mock("@/shared/api", () => ({
   api: {
     getChannelMessages: vi.fn(),

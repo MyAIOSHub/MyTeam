@@ -14,6 +14,7 @@ import { GenerateProjectButton } from "@/features/messaging/components/generate-
 import { PromoteToChannelButton } from "@/features/messaging/components/promote-to-channel-button";
 import { InviteChannelMemberDialog } from "@/features/messaging/components/invite-channel-member-dialog";
 import { useConversationArchiveStore } from "@/features/messaging/stores/archive-store";
+import { useTypingIndicator } from "@/features/messaging/hooks/use-typing-indicator";
 import { useMessageSelectionStore } from "@/features/messaging/stores/selection-store";
 import { api } from "@/shared/api";
 import type { Conversation } from "@/shared/types/messaging";
@@ -303,6 +304,47 @@ function SessionSidebar({
 }
 
 // ---------------------------------------------------------------------------
+// Agent status pill
+// ---------------------------------------------------------------------------
+
+function AgentStatusPill({
+  status,
+  isTyping,
+}: {
+  status?: string;
+  isTyping: boolean;
+}) {
+  let label: string;
+  let dotClass: string;
+  let pulse = false;
+  if (isTyping) {
+    label = "输入中…";
+    dotClass = "bg-primary";
+    pulse = true;
+  } else if (status === "online") {
+    label = "在线";
+    dotClass = "bg-green-500";
+  } else if (status === "idle" || status === "") {
+    label = "空闲";
+    dotClass = "bg-primary/70";
+  } else if (status === "busy") {
+    label = "忙碌";
+    dotClass = "bg-amber-500";
+  } else {
+    label = "离线";
+    dotClass = "bg-muted-foreground/60";
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-secondary/60 px-2 py-0.5 text-[11px] text-muted-foreground">
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${dotClass} ${pulse ? "animate-pulse" : ""}`}
+      />
+      <span>{label}</span>
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Inbox Panel (right)
 // ---------------------------------------------------------------------------
 
@@ -486,6 +528,25 @@ export default function SessionPage() {
         : null,
     [selectedId, selectedType, sidebarConversations],
   );
+
+  // Peer agent (when the current conversation is a DM with an agent).
+  // Drives the status pill in the header: online / idle / offline / typing.
+  const agentsList = useWorkspaceStore((s) => s.agents);
+  const peerAgent = useMemo(() => {
+    if (selectedType !== "dm" || selectedConversation?.peer_type !== "agent") return null;
+    return agentsList.find((a) => a.id === selectedId) ?? null;
+  }, [selectedType, selectedConversation, agentsList, selectedId]);
+
+  const dmTyping = useTypingIndicator({
+    peerId: selectedType === "dm" ? selectedId ?? undefined : undefined,
+  });
+  const channelTyping = useTypingIndicator({
+    channelId: selectedType === "channel" ? selectedId ?? undefined : undefined,
+  });
+  const peerIsTyping =
+    selectedType === "dm" && selectedId
+      ? dmTyping.typingUsers.includes(selectedId)
+      : false;
 
   // Selection scope follows the active channel/dm. Switching conversations
   // clears whatever was selected so we never leak picks across rooms.
@@ -720,6 +781,12 @@ export default function SessionPage() {
                     </span>
                   </>
                 )}
+                {selectedType === "dm" && peerAgent && (
+                  <AgentStatusPill
+                    status={peerAgent.status}
+                    isTyping={peerIsTyping}
+                  />
+                )}
               </div>
               <div className="flex items-center gap-2">
                 {selectedId && (
@@ -823,8 +890,16 @@ export default function SessionPage() {
               <div className="flex-1 flex flex-col min-w-0">
                 <MessageList
                   messages={messages}
+                  currentUserId={currentUserId}
                   onOpenThread={selectedType === "channel" ? openThreadForMessage : undefined}
                   selectionEnabled={selectionEnabled}
+                  typingUsers={
+                    selectedType === "channel"
+                      ? channelTyping.typingUsers
+                      : peerIsTyping && selectedId
+                        ? [selectedId]
+                        : []
+                  }
                 />
               </div>
               {activeThreadId && selectedType === "channel" && selectedId && (
