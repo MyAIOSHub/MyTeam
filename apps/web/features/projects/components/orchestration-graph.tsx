@@ -36,11 +36,29 @@ interface GraphEdge {
   taskId: string;
 }
 
+// ProjectSummary feeds the always-on overview block at the bottom of
+// the inspector pane. It replaces the old Slots tab — instead of a
+// full sub-page of slot rows, the right pane shows progress / status /
+// completion info that used to live there, and drills into per-task
+// IO only when the user selects a node/edge.
+export interface ProjectSummary {
+  title?: string;
+  status?: string;
+  progressPct: number;       // 0..100, derived by caller
+  completedCount: number;
+  totalCount: number;
+  runStatus?: string;
+  channelId?: string | null;
+  threadId?: string | null;
+  onOpenThread?: () => void;
+}
+
 interface Props {
   tasks: Task[];
   agents: Agent[];
   subagents: Subagent[];
   creatorLabel?: string;
+  projectSummary?: ProjectSummary;
 }
 
 const CREATOR_ID = "__creator__";
@@ -67,6 +85,7 @@ export function OrchestrationGraph({
   agents,
   subagents,
   creatorLabel = "你",
+  projectSummary,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 960, h: 560 });
@@ -285,24 +304,107 @@ export function OrchestrationGraph({
         </div>
       </div>
 
-      {/* Inspector */}
-      <aside className="w-[300px] shrink-0 border-l border-border p-4 overflow-y-auto bg-background/60">
-        {selectedNode ? (
-          <NodeInspector node={selectedNode} />
-        ) : selectedEdge ? (
-          <EdgeInspector
-            edge={selectedEdge}
-            task={tasks.find((t) => t.id === selectedEdge.taskId)}
-            nodes={nodes}
-          />
-        ) : (
-          <div className="text-sm text-muted-foreground text-center pt-10">
-            点击节点或连线查看详情
-          </div>
+      {/* Inspector — top half drills into the selected node/edge;
+          bottom half is the always-on project summary that replaces
+          the old Slots tab (progress / status / done count + thread
+          jump). */}
+      <aside className="w-[320px] shrink-0 border-l border-border flex flex-col bg-background/60">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4">
+          {selectedNode ? (
+            <NodeInspector
+              node={selectedNode}
+              tasks={tasks}
+              allTasks={tasks}
+              nodes={nodes}
+            />
+          ) : selectedEdge ? (
+            <EdgeInspector
+              edge={selectedEdge}
+              task={tasks.find((t) => t.id === selectedEdge.taskId)}
+              nodes={nodes}
+            />
+          ) : (
+            <div className="text-sm text-muted-foreground text-center pt-10">
+              点击节点或连线查看详情
+            </div>
+          )}
+        </div>
+        {projectSummary && (
+          <ProjectSummaryBlock summary={projectSummary} />
         )}
       </aside>
     </div>
   );
+}
+
+function ProjectSummaryBlock({ summary }: { summary: ProjectSummary }) {
+  const pct = Math.max(0, Math.min(100, Math.round(summary.progressPct)));
+  const stateClass =
+    summary.runStatus === "running"
+      ? "text-[#d9775e]"
+      : summary.runStatus === "completed"
+        ? "text-[#4ade80]"
+        : summary.runStatus === "failed"
+          ? "text-destructive"
+          : "text-muted-foreground";
+  return (
+    <div className="border-t border-border bg-card/60 p-3 space-y-2 shrink-0">
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+          项目概览
+        </div>
+        <span className={"text-[11px] font-medium " + stateClass}>
+          {projectStatusLabel(summary.runStatus ?? summary.status)}
+        </span>
+      </div>
+      {summary.title && (
+        <div className="text-xs font-semibold truncate" title={summary.title}>
+          {summary.title}
+        </div>
+      )}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+          <span>进度</span>
+          <span className="font-mono">
+            {summary.completedCount}/{summary.totalCount}
+          </span>
+        </div>
+        <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+          <div
+            className="h-full bg-[#d9775e] transition-all"
+            style={{ width: pct + "%" }}
+          />
+        </div>
+        <div className="text-[10px] text-muted-foreground text-right">
+          {pct}%
+        </div>
+      </div>
+      {summary.onOpenThread && (
+        <button
+          type="button"
+          onClick={summary.onOpenThread}
+          className="w-full text-[11px] px-2 py-1.5 border border-border rounded bg-background hover:bg-accent transition-colors"
+        >
+          打开任务 Thread
+        </button>
+      )}
+    </div>
+  );
+}
+
+function projectStatusLabel(s: string | undefined): string {
+  if (!s) return "未开始";
+  const map: Record<string, string> = {
+    not_started: "未开始",
+    pending: "未开始",
+    in_progress: "进行中",
+    running: "进行中",
+    completed: "已完成",
+    failed: "失败",
+    cancelled: "已取消",
+    paused: "已暂停",
+  };
+  return map[s] ?? s;
 }
 
 /* ---------- Graph build ---------- */
@@ -560,7 +662,24 @@ function StatChip({ label, value }: { label: string; value: string }) {
   );
 }
 
-function NodeInspector({ node }: { node: GraphNode }) {
+function NodeInspector({
+  node,
+  tasks,
+  allTasks,
+  nodes,
+}: {
+  node: GraphNode;
+  tasks: Task[];
+  allTasks: Task[];
+  nodes: GraphNode[];
+}) {
+  // Creator node has no workload — skip the IO sections.
+  const ownTasks =
+    node.id === CREATOR_ID
+      ? []
+      : tasks.filter(
+          (t) => (t.actual_agent_id ?? t.primary_assignee_id) === node.id,
+        );
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3 pb-3 border-b border-border">
@@ -595,12 +714,266 @@ function NodeInspector({ node }: { node: GraphNode }) {
       </div>
       {node.id !== CREATOR_ID && (
         <div className="text-xs text-muted-foreground">
-          ID:{" "}
-          <code className="font-mono">{node.id.slice(0, 12)}</code>
+          ID: <code className="font-mono">{node.id.slice(0, 12)}</code>
+        </div>
+      )}
+
+      {ownTasks.length === 0 ? (
+        node.id === CREATOR_ID ? (
+          <div className="text-xs text-muted-foreground">
+            调度者节点，负责发起任务与最终审批。
+          </div>
+        ) : (
+          <div className="text-xs text-muted-foreground">
+            暂无分配给该节点的任务。
+          </div>
+        )
+      ) : (
+        <div className="space-y-4">
+          {ownTasks.map((t) => (
+            <TaskIOBlock
+              key={t.id}
+              task={t}
+              allTasks={allTasks}
+              nodes={nodes}
+            />
+          ))}
         </div>
       )}
     </div>
   );
+}
+
+/* Inspector block rendering the 输入 / 输出 / 执行过程 tri-panel per
+   task. Shown inside NodeInspector when a node owns tasks, and meant
+   to answer "what does this subagent actually consume, produce, and
+   how is it progressing?" at a glance. */
+function TaskIOBlock({
+  task,
+  allTasks,
+  nodes,
+}: {
+  task: Task;
+  allTasks: Task[];
+  nodes: GraphNode[];
+}) {
+  const upstream = (task.depends_on ?? [])
+    .map((id) => allTasks.find((x) => x.id === id))
+    .filter((x): x is Task => !!x);
+  const upstreamLines = upstream.map((u) => {
+    const assigneeId = u.actual_agent_id ?? u.primary_assignee_id ?? null;
+    const assignee = nodes.find((n) => n.id === assigneeId);
+    return {
+      id: u.id,
+      title: u.title,
+      by: assignee?.label ?? "未分配",
+    };
+  });
+
+  const outputSummary = summarizeResult(task.result);
+  const outputCount = Array.isArray(task.output_refs)
+    ? task.output_refs.length
+    : 0;
+
+  const steps = buildExecutionSteps(task);
+
+  return (
+    <div className="rounded-md border border-border/70 bg-card/60 p-2.5 space-y-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-xs font-semibold leading-snug break-words">
+          {task.title}
+        </div>
+        <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded font-mono bg-muted text-muted-foreground">
+          {taskStatusLabel(task.status)}
+        </span>
+      </div>
+
+      <IOSection title="输入">
+        {task.description && (
+          <p className="text-[11px] text-muted-foreground whitespace-pre-wrap break-words">
+            {task.description}
+          </p>
+        )}
+        {upstreamLines.length > 0 && (
+          <div className="space-y-0.5">
+            <div className="text-[10px] text-muted-foreground/70 font-mono uppercase tracking-wider">
+              上游产物
+            </div>
+            {upstreamLines.map((u) => (
+              <div
+                key={u.id}
+                className="text-[11px] text-foreground/80 truncate"
+                title={`${u.by} · ${u.title}`}
+              >
+                · {u.title}
+                <span className="text-muted-foreground"> — {u.by}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {(task.required_skills?.length ?? 0) > 0 && (
+          <div className="flex flex-wrap gap-1 pt-0.5">
+            {task.required_skills.map((s) => (
+              <span
+                key={s}
+                className="text-[10px] px-1.5 py-0.5 rounded bg-muted/60 font-mono text-muted-foreground"
+              >
+                {s}
+              </span>
+            ))}
+          </div>
+        )}
+        {!task.description &&
+          upstreamLines.length === 0 &&
+          (task.required_skills?.length ?? 0) === 0 && (
+            <EmptyHint>未声明输入</EmptyHint>
+          )}
+      </IOSection>
+
+      <IOSection title="输出">
+        {task.acceptance_criteria && (
+          <div>
+            <div className="text-[10px] text-muted-foreground/70 font-mono uppercase tracking-wider">
+              验收标准
+            </div>
+            <p className="text-[11px] text-muted-foreground whitespace-pre-wrap break-words">
+              {task.acceptance_criteria}
+            </p>
+          </div>
+        )}
+        {outputSummary && (
+          <div>
+            <div className="text-[10px] text-muted-foreground/70 font-mono uppercase tracking-wider">
+              结果
+            </div>
+            <p className="text-[11px] text-foreground/80 whitespace-pre-wrap break-words">
+              {outputSummary}
+            </p>
+          </div>
+        )}
+        {outputCount > 0 && (
+          <div className="text-[11px] text-muted-foreground">
+            关联产物: {outputCount} 项
+          </div>
+        )}
+        {task.error && (
+          <div className="text-[11px] text-destructive whitespace-pre-wrap break-words">
+            错误: {task.error}
+          </div>
+        )}
+        {!task.acceptance_criteria &&
+          !outputSummary &&
+          outputCount === 0 &&
+          !task.error && <EmptyHint>尚无输出</EmptyHint>}
+      </IOSection>
+
+      <IOSection title="执行过程">
+        <ol className="space-y-1.5">
+          {steps.map((s, i) => (
+            <li key={i} className="flex items-start gap-2">
+              <span
+                className="mt-1 shrink-0 inline-block w-1.5 h-1.5 rounded-full"
+                style={{ background: s.color }}
+              />
+              <div className="min-w-0">
+                <div className="text-[11px] text-foreground/90 leading-tight">
+                  {s.label}
+                </div>
+                {s.detail && (
+                  <div className="text-[10px] text-muted-foreground font-mono leading-tight">
+                    {s.detail}
+                  </div>
+                )}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </IOSection>
+    </div>
+  );
+}
+
+function IOSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1">
+      <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+        {title}
+      </div>
+      <div className="space-y-1 pl-0.5">{children}</div>
+    </div>
+  );
+}
+
+function EmptyHint({ children }: { children: React.ReactNode }) {
+  return <div className="text-[11px] text-muted-foreground/60">{children}</div>;
+}
+
+function summarizeResult(r: unknown): string | null {
+  if (!r) return null;
+  if (typeof r === "string") return r.trim() || null;
+  if (typeof r === "object") {
+    const obj = r as Record<string, unknown>;
+    const pick = obj.summary ?? obj.output ?? obj.message ?? obj.text;
+    if (typeof pick === "string") return pick.trim() || null;
+    try {
+      const s = JSON.stringify(obj);
+      return s.length > 200 ? s.slice(0, 200) + "…" : s;
+    } catch {
+      return null;
+    }
+  }
+  return String(r);
+}
+
+function buildExecutionSteps(task: Task): {
+  label: string;
+  detail?: string;
+  color: string;
+}[] {
+  const steps: { label: string; detail?: string; color: string }[] = [];
+  const hasAssignee = !!(task.actual_agent_id ?? task.primary_assignee_id);
+  steps.push({
+    label: hasAssignee ? "已分配" : "待分配",
+    detail: task.primary_assignee_id?.slice(0, 8),
+    color: hasAssignee ? "#d9775e" : "rgba(60,47,32,0.2)",
+  });
+  if (task.started_at) {
+    steps.push({
+      label: "开始执行",
+      detail: new Date(task.started_at).toLocaleString(),
+      color: "#f0b440",
+    });
+  }
+  if (task.current_retry > 0) {
+    steps.push({
+      label: `重试 ${task.current_retry} 次`,
+      color: "#f0b440",
+    });
+  }
+  if (task.status === "under_review") {
+    steps.push({ label: "等待审核", color: "#7c83ff" });
+  }
+  if (task.status === "needs_human" || task.status === "needs_attention") {
+    steps.push({ label: "需要人工介入", color: "#ef4444" });
+  }
+  if (task.completed_at) {
+    steps.push({
+      label: task.status === "failed" ? "失败" : "已完成",
+      detail: new Date(task.completed_at).toLocaleString(),
+      color: task.status === "failed" ? "#ef4444" : "#4ade80",
+    });
+  } else if (!task.started_at) {
+    steps.push({ label: "尚未开始", color: "rgba(60,47,32,0.2)" });
+  } else {
+    steps.push({ label: "进行中…", color: "#d9775e" });
+  }
+  return steps;
 }
 
 function EdgeInspector({

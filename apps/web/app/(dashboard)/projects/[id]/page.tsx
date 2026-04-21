@@ -13,6 +13,7 @@ import {
   ListTodo,
   Trash2,
   Hash,
+  MessageSquare,
 } from "lucide-react";
 import { useProjectStore } from "@/features/projects";
 import { useWorkspaceStore } from "@/features/workspace";
@@ -155,7 +156,9 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
   // "graph" is the force-directed bubble view from the Hi-Fi reference;
   // "dag" is a rectilinear column-per-rank view for reading depends_on
   // chains without bezier noise.
-  const [taskView, setTaskView] = useState<"list" | "graph" | "dag" | "board">("list");
+  // 列表 merged into DAG tab — DAG view now renders list above the
+  // diagram so both live side-by-side under one toggle.
+  const [taskView, setTaskView] = useState<"graph" | "board" | "dag">("graph");
   // Slots tab state — selected task id drives the right-pane slot list.
   const [slotSelectedTaskId, setSlotSelectedTaskId] = useState<string | null>(null);
   const [slotsByTask, setSlotsByTask] = useState<Record<string, ParticipantSlot[]>>({});
@@ -592,6 +595,19 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
               频道
             </Button>
           )}
+          {(plan as any)?.thread_id && currentProject.channel_id && (
+            <Button
+              variant="outline"
+              onClick={() =>
+                router.push(
+                  `/session?id=${currentProject.channel_id}&type=channel&thread=${(plan as any).thread_id}`,
+                )
+              }
+            >
+              <MessageSquare className="size-4 mr-1" />
+              任务 Thread
+            </Button>
+          )}
           <Button
             variant="outline"
             onClick={() => {
@@ -622,7 +638,6 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
         <TabsList>
           <TabsTrigger value="plan">计划</TabsTrigger>
           <TabsTrigger value="tasks">任务</TabsTrigger>
-          <TabsTrigger value="slots">Slots</TabsTrigger>
           <TabsTrigger value="results">结果</TabsTrigger>
         </TabsList>
 
@@ -750,7 +765,8 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
           </div>
         </TabsContent>
 
-        {/* Tab: 任务 — 列表/气泡图/DAG/看板 four-way toggle */}
+        {/* Tab: 任务 — 编排图/看板/DAG three-way toggle. 列表 folded into
+            DAG so the DAG view shows both the task cards and the graph. */}
         <TabsContent value="tasks" className="flex flex-col flex-1 min-h-0 space-y-3">
           {!hasTasks ? (
             <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
@@ -764,10 +780,9 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
               <div className="flex items-center gap-2">
                 {(
                   [
-                    { key: "list", label: "列表" },
                     { key: "graph", label: "编排图" },
-                    { key: "dag", label: "DAG" },
                     { key: "board", label: "看板" },
+                    { key: "dag", label: "DAG" },
                   ] as const
                 ).map(({ key, label }) => (
                   <Button
@@ -781,33 +796,57 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
                 ))}
               </div>
 
-              {taskView === "list" && (
-                <div className="space-y-3">
-                  {sortedTasks.map((t) => (
-                    <ExecutionStepCard
-                      key={t.id}
-                      step={t}
-                      agents={agents}
-                      subagents={subagents}
-                    />
-                  ))}
-                </div>
-              )}
-
               {taskView === "graph" && (
                 <OrchestrationGraph
                   tasks={sortedTasks}
                   agents={agents}
                   subagents={subagents}
+                  projectSummary={{
+                    title: currentProject.title,
+                    status: currentProject.status,
+                    runStatus: activeRun?.status,
+                    completedCount: sortedTasks.filter(
+                      (t) => t.status === "completed",
+                    ).length,
+                    totalCount: sortedTasks.length,
+                    progressPct:
+                      sortedTasks.length === 0
+                        ? 0
+                        : (sortedTasks.filter((t) => t.status === "completed")
+                            .length /
+                            sortedTasks.length) *
+                          100,
+                    channelId: currentProject.channel_id,
+                    threadId: (plan as any)?.thread_id ?? null,
+                    onOpenThread:
+                      (plan as any)?.thread_id && currentProject.channel_id
+                        ? () =>
+                            router.push(
+                              `/session?id=${currentProject.channel_id}&type=channel&thread=${(plan as any).thread_id}`,
+                            )
+                        : undefined,
+                  }}
                 />
               )}
 
               {taskView === "dag" && (
-                <OrchestrationDAG
-                  tasks={sortedTasks}
-                  agents={agents}
-                  subagents={subagents}
-                />
+                <div className="space-y-4">
+                  <OrchestrationDAG
+                    tasks={sortedTasks}
+                    agents={agents}
+                    subagents={subagents}
+                  />
+                  <div className="space-y-3">
+                    {sortedTasks.map((t) => (
+                      <ExecutionStepCard
+                        key={t.id}
+                        step={t}
+                        agents={agents}
+                        subagents={subagents}
+                      />
+                    ))}
+                  </div>
+                </div>
               )}
 
               {taskView === "board" && (
@@ -858,22 +897,10 @@ export default function ProjectDetailPage({ projectId }: ProjectDetailProps) {
           )}
         </TabsContent>
 
-        {/* Tab: Slots — drills into each task's participant_slot rows
-            so the reviewer can see who does what, when, and whether
-            it blocks downstream work. */}
-        <TabsContent value="slots" className="flex flex-col flex-1 min-h-0">
-          <SlotsPanel
-            tasks={sortedTasks}
-            selectedTaskId={slotSelectedTaskId}
-            onSelect={(id) => {
-              setSlotSelectedTaskId(id);
-              void ensureSlotsLoaded(id);
-            }}
-            slotsByTask={slotsByTask}
-            agents={agents}
-            subagents={subagents}
-          />
-        </TabsContent>
+        {/* Slots tab removed — summary (progress/status) moved into
+            the orchestration graph inspector so it's always visible;
+            per-task slot detail is part of that inspector's per-task
+            block. */}
 
         {/* Tab: 结果 — aggregates artifacts + per-task output_refs +
             active run's output_refs + run history. Former 执行 tab

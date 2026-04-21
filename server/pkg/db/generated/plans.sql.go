@@ -389,3 +389,20 @@ func (q *Queries) UpdatePlanProject(ctx context.Context, arg UpdatePlanProjectPa
 	_, err := q.db.Exec(ctx, updatePlanProject, arg.ProjectID, arg.VersionID, arg.ID)
 	return err
 }
+
+const updatePlanThreadID = `-- name: UpdatePlanThreadID :exec
+UPDATE plan SET thread_id = $1, updated_at = NOW() WHERE id = $2
+`
+
+type UpdatePlanThreadIDParams struct {
+	ThreadID pgtype.UUID `json:"thread_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// Binds a plan to the thread that tracks its task-completion events.
+// Created by project_create once the channel + thread land so the
+// scheduler can post per-task updates into the same thread.
+func (q *Queries) UpdatePlanThreadID(ctx context.Context, arg UpdatePlanThreadIDParams) error {
+	_, err := q.db.Exec(ctx, updatePlanThreadID, arg.ThreadID, arg.ID)
+	return err
+}
