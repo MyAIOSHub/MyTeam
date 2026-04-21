@@ -46,6 +46,65 @@ func redactKey(s string) string {
 	return apiKeyRedactRE.ReplaceAllString(s, "sk-***")
 }
 
+// senderNameCache keys by "<type>:<id>" so agent and member UUIDs can
+// coexist without collision. buildSenderNameCache resolves every
+// distinct sender in the history + trigger so the transcript handed
+// to the LLM reads as human names rather than raw UUIDs.
+type senderNameCache map[string]string
+
+func (s *AutoReplyService) buildSenderNameCache(
+	ctx context.Context,
+	workspaceID pgtype.UUID,
+	history []db.Message,
+	trigger db.Message,
+) senderNameCache {
+	cache := make(senderNameCache)
+	seen := make(map[string]struct{})
+	collect := func(id pgtype.UUID, t string) {
+		key := t + ":" + util.UUIDToString(id)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		switch t {
+		case "agent":
+			if a, err := s.Queries.GetAgent(ctx, id); err == nil {
+				if a.DisplayName.Valid && a.DisplayName.String != "" {
+					cache[key] = a.DisplayName.String
+				} else {
+					cache[key] = a.Name
+				}
+			}
+		case "member":
+			// message.sender_id for members holds the user_id; grab the
+			// display name from the user row (members table has no name).
+			if u, err := s.Queries.GetUser(ctx, id); err == nil {
+				name := u.Name
+				if name == "" {
+					name = u.Email
+				}
+				if name != "" {
+					cache[key] = name
+				}
+			}
+		}
+		_ = workspaceID
+	}
+	for _, m := range history {
+		collect(m.SenderID, m.SenderType)
+	}
+	collect(trigger.SenderID, trigger.SenderType)
+	return cache
+}
+
+func resolveSenderName(cache senderNameCache, id pgtype.UUID, senderType string) string {
+	key := senderType + ":" + util.UUIDToString(id)
+	if name, ok := cache[key]; ok && name != "" {
+		return name
+	}
+	return util.UUIDToString(id)
+}
+
 // loadAgentCloudLLMConfig fetches the cloud LLM config for an agent by
 // reading the agent's runtime metadata under the "cloud_llm_config" key.
 // Page-scoped system agents (Account/Conversation/Project/File Agent)
@@ -157,19 +216,23 @@ func (s *AutoReplyService) replyAsMentionedAgent(ctx context.Context, agentName 
 		return nil
 	}
 
-	// Build prompt with recent context.
+	// Build prompt with recent context. Resolve sender IDs to display
+	// names so the model sees a human-readable transcript instead of
+	// raw UUIDs — multi-turn follow-ups like "what did we just discuss"
+	// depend on the agent recognizing the participants in the history.
 	history, _ := s.Queries.ListChannelMessages(ctx, db.ListChannelMessagesParams{
 		ChannelID: util.ParseUUID(channelID),
 		Limit:     20,
 		Offset:    0,
 	})
+	nameCache := s.buildSenderNameCache(ctx, util.ParseUUID(workspaceID), history, trigger)
 	var sb strings.Builder
 	for _, m := range history {
-		sb.WriteString(fmt.Sprintf("[%s]: %s\n", util.UUIDToString(m.SenderID), m.Content))
+		sb.WriteString(fmt.Sprintf("[%s]: %s\n", resolveSenderName(nameCache, m.SenderID, m.SenderType), m.Content))
 	}
 	prompt := fmt.Sprintf("Conversation history:\n%sLatest message from %s: %s\n\nReply as %s:",
 		sb.String(),
-		util.UUIDToString(trigger.SenderID), trigger.Content,
+		resolveSenderName(nameCache, trigger.SenderID, trigger.SenderType), trigger.Content,
 		agentName,
 	)
 
@@ -340,8 +403,28 @@ func (s *AutoReplyService) ReplyToDM(ctx context.Context, agentID string, worksp
 		return
 	}
 
-	// Build prompt from the trigger message.
-	prompt := fmt.Sprintf("User message: %s\n\nReply as %s:", trigger.Content, agent.Name)
+	// Build prompt with recent DM history so the agent has multi-turn
+	// memory. Without this the model sees a single "User message: X"
+	// and cheerfully claims "we haven't talked before" when the user
+	// follows up. history is ordered chronologically; the trigger is
+	// the last row so no duplicate append is needed.
+	history, _ := s.Queries.ListDMMessages(ctx, db.ListDMMessagesParams{
+		WorkspaceID: util.ParseUUID(workspaceID),
+		SelfID:      agent.ID,
+		SelfType:    "agent",
+		PeerID:      util.ParseUUID(senderID),
+		PeerType:    util.StrToText("member"),
+		LimitCount:  40,
+		OffsetCount: 0,
+	})
+	nameCache := s.buildSenderNameCache(ctx, util.ParseUUID(workspaceID), history, trigger)
+	var sb strings.Builder
+	for _, m := range history {
+		sb.WriteString(fmt.Sprintf("[%s]: %s\n", resolveSenderName(nameCache, m.SenderID, m.SenderType), m.Content))
+	}
+	prompt := fmt.Sprintf("Conversation history:\n%sReply as %s to the latest message:",
+		sb.String(), agent.Name,
+	)
 
 	runnerCfg := agent_runner.Config{
 		Kernel:       cfg.Kernel,
