@@ -1248,30 +1248,47 @@ function ConversationRefItem({
     (async () => {
       setLoading(true);
       setErr(null);
+      // project.source_conversations stores {conversation_id, type:
+      // "full" | "message_subset", message_ids, snapshot_at} — the
+      // original channel/dm/thread classifier is NOT audited. Probe
+      // channel first (the common case), fall back to dm on either
+      // empty payload or error. Either probe may return 404/400; both
+      // are treated as "no match, try the next".
+      const tryFetch = async (p: Parameters<typeof api.listMessages>[0]) => {
+        try {
+          const res = await api.listMessages(p);
+          return (res?.messages ?? []) as Array<{
+            id: string;
+            sender_id: string;
+            content: string;
+            created_at: string;
+          }>;
+        } catch {
+          return [];
+        }
+      };
       try {
-        // DM conversations need peer_type hint; channel/thread take
-        // channel_id. When the backend accepts both in the same call,
-        // we pass channel_id as the canonical id — conversation_id is
-        // already a channel id for both channel and thread types.
-        const res = await api.listMessages(
-          conv.type === "dm"
-            ? {
-                recipient_id: conv.conversation_id,
-                peer_type: conv.peer_type ?? "member",
-                limit: 20,
-              }
-            : { channel_id: conv.conversation_id, limit: 20 },
-        );
+        let all = await tryFetch({
+          channel_id: conv.conversation_id,
+          limit: 20,
+        });
+        if (all.length === 0) {
+          // DM fallback — try both peer types so we don't require the
+          // persisted source_conversations entry to carry one.
+          all = await tryFetch({
+            recipient_id: conv.conversation_id,
+            peer_type: "member",
+            limit: 20,
+          });
+        }
+        if (all.length === 0) {
+          all = await tryFetch({
+            recipient_id: conv.conversation_id,
+            peer_type: "agent",
+            limit: 20,
+          });
+        }
         if (cancel) return;
-        const all = (res?.messages ?? []) as Array<{
-          id: string;
-          sender_id: string;
-          content: string;
-          created_at: string;
-        }>;
-        // Filter to the requested subset; fall back to the latest few
-        // messages when no subset was specified so the user still sees
-        // something.
         const filtered = msgIds.length
           ? all.filter((m) => msgIds.includes(m.id))
           : all.slice(-2);
@@ -1285,7 +1302,7 @@ function ConversationRefItem({
     return () => {
       cancel = true;
     };
-  }, [conv.conversation_id, conv.type, msgIds.join(","), conv.peer_type]);
+  }, [conv.conversation_id, conv.type, msgIds.join(",")]);
 
   const resolveName = (senderId: string): string => {
     const m = members.find((x) => x.user_id === senderId);
