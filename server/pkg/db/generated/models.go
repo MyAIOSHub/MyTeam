@@ -66,6 +66,11 @@ type Agent struct {
 	LastActiveAt            pgtype.Timestamptz `json:"last_active_at"`
 	Scope                   pgtype.Text        `json:"scope"`
 	OwnerType               string             `json:"owner_type"`
+	Kind                    string             `json:"kind"`
+	IsGlobal                bool               `json:"is_global"`
+	Source                  string             `json:"source"`
+	SourceRef               pgtype.Text        `json:"source_ref"`
+	Category                string             `json:"category"`
 }
 
 type AgentRuntime struct {
@@ -703,6 +708,10 @@ type Skill struct {
 	CreatedBy   pgtype.UUID        `json:"created_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Category    string             `json:"category"`
+	Source      string             `json:"source"`
+	SourceRef   pgtype.Text        `json:"source_ref"`
+	IsGlobal    bool               `json:"is_global"`
 }
 
 type SkillFile struct {
@@ -712,6 +721,13 @@ type SkillFile struct {
 	Content   string             `json:"content"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SubagentSkill struct {
+	SubagentID pgtype.UUID        `json:"subagent_id"`
+	SkillID    pgtype.UUID        `json:"skill_id"`
+	Position   int32              `json:"position"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
 type Task struct {

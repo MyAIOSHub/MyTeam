@@ -382,6 +382,22 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				})
 			})
 
+			// Subagents — templates that wrap skills. Only subagents can
+			// bridge an agent to a skill; agents cannot link skills
+			// directly anymore (enforced by PlanGenerator + the fact
+			// that subagent_skill is the only live write-path).
+			r.Route("/api/subagents", func(r chi.Router) {
+				r.Get("/", h.ListSubagents)
+				r.Post("/", h.CreateSubagent)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetSubagent)
+					r.Patch("/", h.UpdateSubagent)
+					r.Delete("/", h.DeleteSubagent)
+					r.Post("/skills", h.LinkSubagentSkill)
+					r.Delete("/skills/{skillID}", h.UnlinkSubagentSkill)
+				})
+			})
+
 			// Runtimes
 			r.Route("/api/runtimes", func(r chi.Router) {
 				r.Get("/", h.ListAgentRuntimes)

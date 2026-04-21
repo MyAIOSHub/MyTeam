@@ -1,0 +1,120 @@
+-- Subagents — rows in `agent` where kind = 'subagent'. Treated as
+-- templates rather than runnable agents: they wrap one or more skills
+-- and are the only legitimate bridge between a workspace agent and a
+-- skill after migration 069.
+
+-- name: ListSubagents :many
+-- Returns global + workspace-scoped subagents. Pass NULL workspace_id
+-- to get only globals. Pass a UUID to get globals + that workspace.
+SELECT
+    id, workspace_id, name, description, avatar_url, category,
+    kind, is_global, source, source_ref,
+    created_at, updated_at, archived_at, owner_id, instructions
+FROM agent
+WHERE kind = 'subagent'
+  AND archived_at IS NULL
+  AND (is_global = true OR workspace_id = sqlc.narg('workspace_id'))
+  AND (sqlc.narg('category')::text IS NULL OR category = sqlc.narg('category'))
+ORDER BY is_global DESC, name ASC;
+
+-- name: GetSubagent :one
+SELECT
+    id, workspace_id, name, description, avatar_url, category,
+    kind, is_global, source, source_ref,
+    created_at, updated_at, archived_at, owner_id, instructions
+FROM agent
+WHERE id = $1 AND kind = 'subagent';
+
+-- name: CreateWorkspaceSubagent :one
+INSERT INTO agent (
+    workspace_id, name, description, instructions,
+    category, kind, is_global, source,
+    owner_id, owner_type, agent_type, runtime_mode
+)
+VALUES (
+    $1, $2, $3, $4,
+    $5, 'subagent', false, 'manual',
+    $6, 'user', 'personal_agent', 'cloud'
+)
+RETURNING
+    id, workspace_id, name, description, avatar_url, category,
+    kind, is_global, source, source_ref,
+    created_at, updated_at, archived_at, owner_id, instructions;
+
+-- Idempotent upsert for the bundle loader. Keyed by source_ref so a
+-- file at the same path always maps to the same global subagent.
+-- name: UpsertBundleSubagent :one
+INSERT INTO agent (
+    workspace_id, name, description, instructions,
+    category, kind, is_global, source, source_ref,
+    agent_type, runtime_mode
+)
+VALUES (
+    NULL, $1, $2, $3,
+    $4, 'subagent', true, 'bundle', $5,
+    'system_agent', 'cloud'
+)
+ON CONFLICT (source_ref) WHERE source = 'bundle' AND source_ref IS NOT NULL
+DO UPDATE SET
+    name         = EXCLUDED.name,
+    description  = EXCLUDED.description,
+    instructions = EXCLUDED.instructions,
+    category     = EXCLUDED.category,
+    updated_at   = now()
+RETURNING
+    id, workspace_id, name, description, avatar_url, category,
+    kind, is_global, source, source_ref,
+    created_at, updated_at, archived_at, owner_id, instructions;
+
+-- name: ListBundleSubagentRefs :many
+SELECT id, source_ref FROM agent
+WHERE kind = 'subagent' AND source = 'bundle' AND source_ref IS NOT NULL;
+
+-- name: DeleteBundleSubagentsNotInRefs :exec
+DELETE FROM agent
+WHERE kind = 'subagent'
+  AND source = 'bundle'
+  AND source_ref IS NOT NULL
+  AND source_ref <> ALL(@refs::text[]);
+
+-- name: UpdateSubagent :one
+UPDATE agent SET
+    name         = COALESCE(sqlc.narg('name'),         name),
+    description  = COALESCE(sqlc.narg('description'),  description),
+    instructions = COALESCE(sqlc.narg('instructions'), instructions),
+    category     = COALESCE(sqlc.narg('category'),     category),
+    updated_at   = now()
+WHERE id = $1 AND kind = 'subagent'
+RETURNING
+    id, workspace_id, name, description, avatar_url, category,
+    kind, is_global, source, source_ref,
+    created_at, updated_at, archived_at, owner_id, instructions;
+
+-- name: DeleteSubagent :exec
+DELETE FROM agent WHERE id = $1 AND kind = 'subagent' AND source <> 'bundle';
+
+-- ---------- subagent_skill ----------
+
+-- name: LinkSubagentSkill :exec
+INSERT INTO subagent_skill (subagent_id, skill_id, position)
+VALUES ($1, $2, $3)
+ON CONFLICT (subagent_id, skill_id) DO UPDATE SET position = EXCLUDED.position;
+
+-- name: UnlinkSubagentSkill :exec
+DELETE FROM subagent_skill WHERE subagent_id = $1 AND skill_id = $2;
+
+-- name: UnlinkAllSubagentSkills :exec
+DELETE FROM subagent_skill WHERE subagent_id = $1;
+
+-- name: ListSubagentSkills :many
+SELECT s.* FROM skill s
+JOIN subagent_skill ss ON ss.skill_id = s.id
+WHERE ss.subagent_id = $1
+ORDER BY ss.position ASC, s.name ASC;
+
+-- name: ListSkillSubagents :many
+SELECT a.id, a.name, a.category, a.is_global, a.workspace_id
+FROM agent a
+JOIN subagent_skill ss ON ss.subagent_id = a.id
+WHERE ss.skill_id = $1 AND a.kind = 'subagent' AND a.archived_at IS NULL
+ORDER BY a.name ASC;

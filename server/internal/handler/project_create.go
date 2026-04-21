@@ -234,8 +234,19 @@ func (h *Handler) CreateProjectFromChat(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Step 3: Generate plan with context using PlanGenerator
-	genResult, err := h.PlanGenerator.GeneratePlanWithContext(ctx, chatContext, agentIdentities, workspaceID)
+	// Step 3a: Load subagent templates (global + workspace) so the
+	// planner can route skill-bearing tasks through them. Per
+	// migration 069, skills are only reachable via a subagent; the
+	// generator enforces this through validateSkillSubagent.
+	subagentIdentities, err := h.loadSubagentIdentities(ctx, workspaceID)
+	if err != nil {
+		slog.Error("failed to load subagents for plan generation", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load subagents")
+		return
+	}
+
+	// Step 3b: Generate plan with context using PlanGenerator
+	genResult, err := h.PlanGenerator.GeneratePlanWithContext(ctx, chatContext, agentIdentities, subagentIdentities, workspaceID)
 	if err != nil {
 		slog.Error("failed to generate plan from chat context", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to generate plan")
@@ -374,6 +385,41 @@ func (h *Handler) CreateProjectFromChat(w http.ResponseWriter, r *http.Request) 
 	)
 
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// loadSubagentIdentities returns the subagent pool visible to the
+// workspace (globals + workspace-local), hydrated with their linked
+// skills so the plan-generation prompt can steer skill-bearing tasks
+// toward a subagent. Enumerating skills per subagent is bounded by the
+// bundle size + user-linked rows, so the extra query count is small.
+func (h *Handler) loadSubagentIdentities(ctx context.Context, workspaceID string) ([]service.SubagentIdentity, error) {
+	rows, err := h.Queries.ListSubagents(ctx, db.ListSubagentsParams{
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]service.SubagentIdentity, 0, len(rows))
+	for _, row := range rows {
+		skills, err := h.Queries.ListSubagentSkills(ctx, row.ID)
+		if err != nil {
+			slog.Warn("loadSubagentIdentities: skills query failed; continuing without roster",
+				"subagent_id", uuidToString(row.ID), "error", err)
+		}
+		skillNames := make([]string, 0, len(skills))
+		for _, s := range skills {
+			skillNames = append(skillNames, s.Name)
+		}
+		out = append(out, service.SubagentIdentity{
+			ID:          uuidToString(row.ID),
+			Name:        row.Name,
+			Description: row.Description,
+			Category:    row.Category,
+			IsGlobal:    row.IsGlobal,
+			Skills:      skillNames,
+		})
+	}
+	return out, nil
 }
 
 // materializePlanDrafts inserts Task and ParticipantSlot rows for the
