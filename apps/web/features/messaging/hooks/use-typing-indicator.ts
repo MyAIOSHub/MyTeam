@@ -11,6 +11,9 @@ const SEND_DEBOUNCE_MS = 1000;
 
 interface UseTypingIndicatorParams {
   channelId?: string;
+  // When set, the hook listens for DM typing events where the event's
+  // sender matches peerId and recipient matches the current user.
+  peerId?: string;
 }
 
 interface UseTypingIndicatorReturn {
@@ -20,6 +23,7 @@ interface UseTypingIndicatorReturn {
 
 export function useTypingIndicator({
   channelId,
+  peerId,
 }: UseTypingIndicatorParams): UseTypingIndicatorReturn {
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -44,15 +48,23 @@ export function useTypingIndicator({
     "typing",
     useCallback(
       (payload: unknown) => {
-        const data = payload as TypingPayload;
+        const data = payload as TypingPayload & { recipient_id?: string };
 
         // Filter out self-events
         const selfId = useAuthStore.getState().user?.id;
         if (data.sender_id === selfId) return;
 
-        // Filter by channel
-        if (channelId && data.channel_id !== channelId) return;
-        if (!channelId) return;
+        // Scope match: either channel mode or DM mode.
+        if (channelId) {
+          if (data.channel_id !== channelId) return;
+        } else if (peerId) {
+          // DM mode: the agent broadcasts typing to the workspace with
+          // sender_id=agent, recipient_id=user. Match the pair.
+          if (data.sender_id !== peerId) return;
+          if (data.recipient_id && data.recipient_id !== selfId) return;
+        } else {
+          return;
+        }
 
         const senderId = data.sender_id;
 
@@ -80,7 +92,7 @@ export function useTypingIndicator({
           setTypingUsers((prev) => prev.filter((id) => id !== senderId));
         }
       },
-      [channelId],
+      [channelId, peerId],
     ),
   );
 

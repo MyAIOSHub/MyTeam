@@ -595,6 +595,23 @@ export default function SessionPage() {
   // Thread state
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
 
+  // Threads have their own UUIDs, distinct from the root message. Opening
+  // a thread from a message requires creating the thread row first (or
+  // returning the existing one). The backend's CreateThread endpoint is
+  // idempotent on root_message_id so repeated calls are safe.
+  const openThreadForMessage = useCallback(
+    async (msgId: string) => {
+      if (!selectedId || selectedType !== "channel") return;
+      try {
+        const thread = await api.createThread(selectedId, { root_message_id: msgId });
+        setActiveThreadId(thread.id);
+      } catch {
+        toast.error("打开讨论串失败");
+      }
+    },
+    [selectedId, selectedType],
+  );
+
   // Search + Create state
   const [sidebarSearch, setSidebarSearch] = useState("");
   const [showCreateChannel, setShowCreateChannel] = useState(false);
@@ -806,7 +823,7 @@ export default function SessionPage() {
               <div className="flex-1 flex flex-col min-w-0">
                 <MessageList
                   messages={messages}
-                  onOpenThread={selectedType === "channel" ? (msgId) => setActiveThreadId(msgId) : undefined}
+                  onOpenThread={selectedType === "channel" ? openThreadForMessage : undefined}
                   selectionEnabled={selectionEnabled}
                 />
               </div>

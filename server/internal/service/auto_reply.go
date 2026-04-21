@@ -105,6 +105,36 @@ func resolveSenderName(cache senderNameCache, id pgtype.UUID, senderType string)
 	return util.UUIDToString(id)
 }
 
+// broadcastAgentTyping emits a "typing" WS event so the UI can show an
+// "agent is typing" pill while the LLM runs. Exactly one of channelID /
+// recipientID should be set — channel mentions get channel_id, DM
+// replies get recipient_id.
+func (s *AutoReplyService) broadcastAgentTyping(
+	workspaceID, senderID string,
+	channelID, recipientID *string,
+	isTyping bool,
+) {
+	if s.Hub == nil {
+		return
+	}
+	payload := map[string]any{
+		"sender_id":   senderID,
+		"sender_type": "agent",
+		"is_typing":   isTyping,
+	}
+	if channelID != nil {
+		payload["channel_id"] = *channelID
+	}
+	if recipientID != nil {
+		payload["recipient_id"] = *recipientID
+	}
+	data, err := json.Marshal(map[string]any{"type": "typing", "payload": payload})
+	if err != nil {
+		return
+	}
+	s.Hub.BroadcastToWorkspace(workspaceID, data)
+}
+
 // loadAgentCloudLLMConfig fetches the cloud LLM config for an agent by
 // reading the agent's runtime metadata under the "cloud_llm_config" key.
 // Page-scoped system agents (Account/Conversation/Project/File Agent)
@@ -253,6 +283,12 @@ func (s *AutoReplyService) replyAsMentionedAgent(ctx context.Context, agentName 
 		"kernel", cfg.Kernel,
 		"model", cfg.Model,
 	)
+
+	// Surface "agent is typing" in the UI while the LLM is running.
+	// Must be paired with a matching is_typing=false after the reply is
+	// posted so the indicator clears even on Runner failure.
+	s.broadcastAgentTyping(workspaceID, util.UUIDToString(agent.ID), &channelID, nil, true)
+	defer s.broadcastAgentTyping(workspaceID, util.UUIDToString(agent.ID), &channelID, nil, false)
 
 	reply, err := s.Runner.Run(ctx, prompt, runnerCfg)
 	if err != nil {
@@ -438,6 +474,9 @@ func (s *AutoReplyService) ReplyToDM(ctx context.Context, agentID string, worksp
 	}
 
 	slog.Info("dm-reply dispatching", "agent", agent.Name, "sender", senderID)
+
+	s.broadcastAgentTyping(workspaceID, util.UUIDToString(agent.ID), nil, &senderID, true)
+	defer s.broadcastAgentTyping(workspaceID, util.UUIDToString(agent.ID), nil, &senderID, false)
 
 	reply, err := s.Runner.Run(ctx, prompt, runnerCfg)
 	if err != nil {

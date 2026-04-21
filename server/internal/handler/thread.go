@@ -110,6 +110,16 @@ func (h *Handler) CreateThread(w http.ResponseWriter, r *http.Request) {
 
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
+	// Idempotent: if a thread already exists for this root message, return
+	// it instead of creating a duplicate. Lets the "open thread" UI call
+	// POST /threads every time without a pre-flight lookup.
+	if req.RootMessageID != nil && *req.RootMessageID != "" {
+		if existing, err := h.Queries.GetThreadByRootMessage(r.Context(), parseUUID(*req.RootMessageID)); err == nil {
+			writeJSON(w, http.StatusOK, threadToResponse(existing))
+			return
+		}
+	}
+
 	thread, err := h.Queries.CreateThread(r.Context(), db.CreateThreadParams{
 		ID:            pgtype.UUID{},
 		ChannelID:     parseUUID(channelID),
