@@ -46,19 +46,27 @@ func redactKey(s string) string {
 	return apiKeyRedactRE.ReplaceAllString(s, "sk-***")
 }
 
-// loadAgentCloudLLMConfig fetches the cloud LLM config for an agent by reading
-// the agent's runtime metadata under the "cloud_llm_config" key. Returns an
-// empty CloudLLMConfig (and no error) when the agent has no runtime or the key
-// is absent — callers must check APIKey before using.
+// loadAgentCloudLLMConfig fetches the cloud LLM config for an agent by
+// reading the agent's runtime metadata under the "cloud_llm_config" key.
+// Page-scoped system agents (Account/Conversation/Project/File Agent)
+// don't have per-runtime metadata — they share the workspace's cloud
+// runtime, which is only guaranteed to exist, not to carry cloud_llm_config.
+// In that case we fall back to the process-wide AGENT_LLM_* env so every
+// system agent reaches the same Claude Agent SDK configuration.
 func loadAgentCloudLLMConfig(ctx context.Context, q *db.Queries, agent db.Agent) (CloudLLMConfig, error) {
+	envCfg := LoadCloudLLMConfigFromEnv()
 	if !agent.RuntimeID.Valid {
-		return CloudLLMConfig{}, nil
+		return envCfg, nil
 	}
 	runtime, err := q.GetAgentRuntime(ctx, agent.RuntimeID)
 	if err != nil {
-		return CloudLLMConfig{}, err
+		return envCfg, err
 	}
-	return cloudLLMConfigFromRuntime(runtime), nil
+	cfg := cloudLLMConfigFromRuntime(runtime)
+	if cfg.APIKey == "" {
+		return envCfg, nil
+	}
+	return cfg, nil
 }
 
 // cloudLLMConfigFromRuntime parses runtime.metadata and extracts the
@@ -249,6 +257,29 @@ func (s *AutoReplyService) postSystemNotification(ctx context.Context, agent db.
 	}
 }
 
+func (s *AutoReplyService) postDMSystemNotification(ctx context.Context, agent db.Agent, recipientID, workspaceID pgtype.UUID, message string) {
+	meta, _ := json.Marshal(map[string]any{"system_notification": true})
+	msg, err := s.Queries.CreateMessage(ctx, db.CreateMessageParams{
+		WorkspaceID:   workspaceID,
+		SenderID:      agent.ID,
+		SenderType:    "agent",
+		RecipientID:   recipientID,
+		RecipientType: util.StrToText("member"),
+		Content:       message,
+		ContentType:   "text",
+		Type:          "system_notification",
+		Metadata:      meta,
+	})
+	if err != nil {
+		slog.Warn("post dm system_notification failed", "error", err)
+		return
+	}
+	if s.Hub != nil {
+		data, _ := json.Marshal(map[string]any{"type": "message:created", "payload": messageToMap(msg)})
+		s.Hub.BroadcastToWorkspace(util.UUIDToString(workspaceID), data)
+	}
+}
+
 func messageToMap(m db.Message) map[string]any {
 	return map[string]any{
 		"id":           util.UUIDToString(m.ID),
@@ -298,10 +329,14 @@ func (s *AutoReplyService) ReplyToDM(ctx context.Context, agentID string, worksp
 	cfg, cfgErr := loadAgentCloudLLMConfig(ctx, s.Queries, agent)
 	if cfgErr != nil {
 		slog.Warn("dm-reply: bad config", "agent", agent.Name, "error", cfgErr)
+		s.postDMSystemNotification(ctx, agent, util.ParseUUID(senderID), util.ParseUUID(workspaceID),
+			"Agent configuration is invalid: "+redactKey(cfgErr.Error()))
 		return
 	}
 	if cfg.APIKey == "" {
 		slog.Info("dm-reply: agent not configured (no API key)", "agent", agent.Name)
+		s.postDMSystemNotification(ctx, agent, util.ParseUUID(senderID), util.ParseUUID(workspaceID),
+			"Agent is not configured: missing API key.")
 		return
 	}
 
@@ -324,9 +359,13 @@ func (s *AutoReplyService) ReplyToDM(ctx context.Context, agentID string, worksp
 	reply, err := s.Runner.Run(ctx, prompt, runnerCfg)
 	if err != nil {
 		slog.Warn("dm-reply runner failed", "agent", agent.Name, "error", err)
+		s.postDMSystemNotification(ctx, agent, util.ParseUUID(senderID), util.ParseUUID(workspaceID),
+			"Agent reply failed: "+redactKey(err.Error()))
 		return
 	}
 	if reply == "" {
+		s.postDMSystemNotification(ctx, agent, util.ParseUUID(senderID), util.ParseUUID(workspaceID),
+			"Agent returned empty reply.")
 		return
 	}
 

@@ -405,6 +405,7 @@ export default function SessionPage() {
   const [selectionEnabled, setSelectionEnabled] = useState(false);
   const setSelectionScope = useMessageSelectionStore((s) => s.setScope);
   const clearSelection = useMessageSelectionStore((s) => s.clear);
+  const setAllSelection = useMessageSelectionStore((s) => s.setAll);
   const selectionCount = useMessageSelectionStore((s) => s.selectedIds.size);
 
   // Channel messages (local state like channel detail page)
@@ -726,6 +727,27 @@ export default function SessionPage() {
                       <CheckSquare className="h-3.5 w-3.5" />
                       {selectionEnabled ? `Selecting (${selectionCount})` : "Select"}
                     </button>
+                    {selectionEnabled && messages.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allIds = messages.map((m) => m.id);
+                          const allSelected =
+                            selectionCount === allIds.length && allIds.length > 0;
+                          if (allSelected) {
+                            clearSelection();
+                          } else {
+                            setAllSelection(allIds);
+                          }
+                        }}
+                        title="全选 / 取消全选当前可见消息"
+                        className="flex items-center gap-1 px-2 h-7 rounded-md text-[12px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                      >
+                        {selectionCount === messages.length && messages.length > 0
+                          ? "取消全选"
+                          : "全选"}
+                      </button>
+                    )}
                     <GenerateProjectButton
                       sourceType={selectedType}
                       sourceId={selectedId}

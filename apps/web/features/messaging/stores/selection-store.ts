@@ -11,6 +11,9 @@ interface MessageSelectionState {
   setScope: (channelId: string | null) => void;
   toggle: (id: string) => void;
   clear: () => void;
+  // setAll replaces the current selection with the given id list. Used by
+  // the "全选" toggle — passing an empty list is equivalent to clear().
+  setAll: (ids: string[]) => void;
 }
 
 export const useMessageSelectionStore = create<MessageSelectionState>()((set) => ({
@@ -29,4 +32,5 @@ export const useMessageSelectionStore = create<MessageSelectionState>()((set) =>
       return { selectedIds: next };
     }),
   clear: () => set({ selectedIds: new Set() }),
+  setAll: (ids) => set({ selectedIds: new Set(ids) }),
 }));
