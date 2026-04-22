@@ -926,18 +926,33 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
 	}
-	backend, err := agent.New(provider, agent.Config{
+	backendType, sessionKey := d.selectBackendType(provider, task)
+	agentCfg := agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
 		Logger:         d.logger,
-	})
+	}
+
+	backend, err := agent.New(backendType, agentCfg)
 	if err != nil {
-		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
+		// If the opt-in persistent backend can't be constructed, fall back to
+		// the default single-shot path so the task still runs.
+		if backendType != provider {
+			d.logger.Warn("claude-persistent backend init failed; falling back to single-shot",
+				"error", err)
+			backend, err = agent.New(provider, agentCfg)
+			backendType = provider
+			sessionKey = ""
+		}
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
+		}
 	}
 
 	reused := task.PriorWorkDir != "" && env.WorkDir == task.PriorWorkDir
 	taskLog.Info("starting agent",
 		"provider", provider,
+		"backend", backendType,
 		"workdir", env.WorkDir,
 		"model", entry.Model,
 		"reused", reused,
@@ -948,12 +963,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 
 	taskStart := time.Now()
 
-	session, err := backend.Execute(ctx, prompt, agent.ExecOptions{
+	execOpts := agent.ExecOptions{
 		Cwd:             env.WorkDir,
 		Model:           entry.Model,
 		Timeout:         d.cfg.AgentTimeout,
 		ResumeSessionID: task.PriorSessionID,
-	})
+		SessionKey:      sessionKey,
+	}
+
+	session, err := backend.Execute(ctx, prompt, execOpts)
+	if err != nil && backendType == "claude-persistent" {
+		// Persistent-backend Execute failure (pool exhausted, stdin write
+		// broken, process spawn error) should not doom the task — retry
+		// once with single-shot, which is independent of the session pool.
+		d.logger.Warn("claude-persistent Execute failed; falling back to single-shot",
+			"error", err)
+		if fallback, fbErr := agent.New(provider, agentCfg); fbErr == nil {
+			execOpts.SessionKey = ""
+			session, err = fallback.Execute(ctx, prompt, execOpts)
+		}
+	}
 	if err != nil {
 		return TaskResult{}, err
 	}
@@ -1156,6 +1185,18 @@ func truncateLog(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "…"
+}
+
+// selectBackendType picks the agent backend type and derived session key for
+// a task. For Claude with MULTICA_CLAUDE_MODE=persistent, it returns
+// "claude-persistent" and an (agent, issue) session key so turns on the same
+// issue reuse the same long-lived Claude process. All other combinations
+// return the provider string and an empty key, matching default behavior.
+func (d *Daemon) selectBackendType(provider string, task Task) (string, string) {
+	if provider == "claude" && d.cfg.ClaudeMode == ClaudeModePersistent {
+		return "claude-persistent", task.AgentID + ":" + task.IssueID
+	}
+	return provider, ""
 }
 
 func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {

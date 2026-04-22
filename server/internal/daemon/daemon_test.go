@@ -18,6 +18,39 @@ func TestNormalizeServerBaseURL(t *testing.T) {
 	}
 }
 
+func TestSelectBackendType(t *testing.T) {
+	t.Parallel()
+
+	task := Task{AgentID: "agent-1", IssueID: "issue-42"}
+
+	tests := []struct {
+		name        string
+		provider    string
+		claudeMode  string
+		wantBackend string
+		wantKey     string
+	}{
+		{"claude single mode returns default backend", "claude", ClaudeModeSingle, "claude", ""},
+		{"claude persistent mode returns pooled backend", "claude", ClaudeModePersistent, "claude-persistent", "agent-1:issue-42"},
+		{"codex ignores claude mode", "codex", ClaudeModePersistent, "codex", ""},
+		{"opencode ignores claude mode", "opencode", ClaudeModePersistent, "opencode", ""},
+		{"empty mode treated as single", "claude", "", "claude", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &Daemon{cfg: Config{ClaudeMode: tt.claudeMode}}
+			backend, key := d.selectBackendType(tt.provider, task)
+			if backend != tt.wantBackend {
+				t.Errorf("backend: got %q, want %q", backend, tt.wantBackend)
+			}
+			if key != tt.wantKey {
+				t.Errorf("session key: got %q, want %q", key, tt.wantKey)
+			}
+		})
+	}
+}
+
 func TestBuildPromptContainsIssueID(t *testing.T) {
 	t.Parallel()
 

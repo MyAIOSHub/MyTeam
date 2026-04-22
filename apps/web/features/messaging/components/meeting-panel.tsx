@@ -13,6 +13,41 @@ import {
 import { toast } from "sonner";
 import { api } from "@/shared/api";
 import type { ChannelMeeting } from "@/shared/types";
+import { useAuthStore } from "@/features/auth";
+
+// Minimal local types for the Web Speech API — the browser's built-in
+// names aren't exposed in TypeScript's default lib. Only the surface we
+// actually read is typed; anything else stays unknown.
+interface WebSpeechResultAlternative {
+  transcript?: string;
+}
+interface WebSpeechResult {
+  isFinal: boolean;
+  0?: WebSpeechResultAlternative;
+  [index: number]: WebSpeechResultAlternative | undefined;
+}
+interface WebSpeechResultList {
+  length: number;
+  [index: number]: WebSpeechResult | undefined;
+}
+interface WebSpeechEvent {
+  resultIndex: number;
+  results: WebSpeechResultList;
+}
+interface WebSpeechErrorEvent {
+  error: string;
+}
+interface WebSpeechRecognition {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((ev: WebSpeechEvent) => void) | null;
+  onerror: ((ev: WebSpeechErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+type WebSpeechCtor = new () => WebSpeechRecognition;
 
 /**
  * Channel-scoped meeting panel (migration 076).
@@ -31,9 +66,11 @@ import type { ChannelMeeting } from "@/shared/types";
  */
 export function MeetingPanel({
   channelId,
+  initialMeetingId,
   onClose,
 }: {
   channelId: string;
+  initialMeetingId?: string | null;
   onClose: () => void;
 }) {
   const [meeting, setMeeting] = useState<ChannelMeeting | null>(null);
@@ -51,6 +88,43 @@ export function MeetingPanel({
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTsRef = useRef<number>(0);
+
+  // Live single-speaker transcript powered by the browser's SpeechRecognition
+  // API. Runs alongside the MediaRecorder so the user sees running text
+  // while speaking. Doubao's server-side multi-speaker transcript replaces
+  // this view after processing completes.
+  type LiveSegment = { id: string; speaker: string; text: string; interim: boolean; ts: number };
+  const [liveSegments, setLiveSegments] = useState<LiveSegment[]>([]);
+  const [speechSupported, setSpeechSupported] = useState(true);
+  const recognitionRef = useRef<WebSpeechRecognition | null>(null);
+  // Consecutive-failure backoff: if start() throws or onend fires again
+  // within 1s of last start, increment. At ≥ 3 failures inside a 1s
+  // window, stop restarting + flip speechSupported=false so the UI
+  // fallback message renders.
+  const failureCountRef = useRef(0);
+  const lastStartTsRef = useRef(0);
+  const currentUser = useAuthStore((s) => s.user);
+  const speakerName = currentUser?.name ?? currentUser?.email ?? "我";
+
+  // When opened with an existing meeting id (clicked an inline meeting
+  // bubble after it finished), preload the row so the panel goes straight
+  // to the summary/transcript view instead of showing the "start a new
+  // meeting" screen.
+  useEffect(() => {
+    if (!initialMeetingId) return;
+    let cancelled = false;
+    api
+      .getChannelMeeting(initialMeetingId)
+      .then((m) => {
+        if (!cancelled) setMeeting(m);
+      })
+      .catch((e) => {
+        if (!cancelled) toast.error(e instanceof Error ? e.message : "加载会议失败");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialMeetingId]);
 
   // Poll processing meetings every 4s so completion ticks in even
   // without a WS event.
@@ -77,6 +151,113 @@ export function MeetingPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meeting?.id, meeting?.updated_at]);
 
+  const stopRecognition = useCallback(() => {
+    const rec = recognitionRef.current;
+    if (!rec) return;
+    try {
+      rec.onresult = null;
+      rec.onerror = null;
+      rec.onend = null;
+      rec.stop();
+    } catch {
+      /* ignore */
+    }
+    recognitionRef.current = null;
+  }, []);
+
+  const startRecognition = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const Ctor =
+      (window as unknown as { SpeechRecognition?: WebSpeechCtor }).SpeechRecognition ??
+      (window as unknown as { webkitSpeechRecognition?: WebSpeechCtor }).webkitSpeechRecognition;
+    if (!Ctor) {
+      setSpeechSupported(false);
+      return;
+    }
+    const rec = new Ctor();
+    rec.lang = "zh-CN";
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = (ev: WebSpeechEvent) => {
+      setLiveSegments((prev) => {
+        // Drop any trailing interim segment; we'll re-append a fresh one.
+        const kept = prev.filter((s) => !s.interim);
+        const updates: LiveSegment[] = [];
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          const r = ev.results[i];
+          if (!r) continue;
+          const text = r[0]?.transcript?.trim() ?? "";
+          if (!text) continue;
+          updates.push({
+            id: `${Date.now()}-${i}`,
+            speaker: speakerName,
+            text,
+            interim: !r.isFinal,
+            ts: Date.now(),
+          });
+        }
+        return [...kept, ...updates];
+      });
+    };
+    rec.onerror = (ev: WebSpeechErrorEvent) => {
+      // Fatal codes — user denied mic, service unavailable, or the
+      // audio device is gone. Detach onend + null the ref BEFORE
+      // returning so the reference-equality guard in onend can't
+      // re-enter and tight-loop rec.start().
+      if (
+        ev.error === "not-allowed" ||
+        ev.error === "service-not-allowed" ||
+        ev.error === "audio-capture"
+      ) {
+        rec.onend = null;
+        if (recognitionRef.current === rec) {
+          recognitionRef.current = null;
+        }
+        setSpeechSupported(false);
+      }
+    };
+    rec.onend = () => {
+      // Auto-restart while the MediaRecorder is still active — the Web
+      // Speech API stops itself after silence or long recognition spans
+      // and we want the live feed to keep ticking.
+      if (recognitionRef.current !== rec || !streamRef.current) return;
+      // Consecutive-failure backoff: if onend fires within 1s of the
+      // last start, count it as a failure. ≥ 3 inside a 1s window →
+      // stop and surface the unsupported fallback.
+      const now = Date.now();
+      if (now - lastStartTsRef.current < 1000) {
+        failureCountRef.current += 1;
+      } else {
+        failureCountRef.current = 0;
+      }
+      if (failureCountRef.current >= 3) {
+        rec.onend = null;
+        recognitionRef.current = null;
+        setSpeechSupported(false);
+        return;
+      }
+      try {
+        lastStartTsRef.current = Date.now();
+        rec.start();
+      } catch {
+        failureCountRef.current += 1;
+        if (failureCountRef.current >= 3) {
+          rec.onend = null;
+          recognitionRef.current = null;
+          setSpeechSupported(false);
+        }
+      }
+    };
+    try {
+      failureCountRef.current = 0;
+      lastStartTsRef.current = Date.now();
+      rec.start();
+      recognitionRef.current = rec;
+    } catch {
+      setSpeechSupported(false);
+    }
+  }, [speakerName]);
+
   const stopRecorder = useCallback(() => {
     const mr = mediaRecorderRef.current;
     if (mr && mr.state !== "inactive") {
@@ -88,8 +269,9 @@ export function MeetingPanel({
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
+    stopRecognition();
     setRecording(false);
-  }, []);
+  }, [stopRecognition]);
 
   useEffect(() => {
     return () => {
@@ -139,6 +321,8 @@ export function MeetingPanel({
       mr.start(1000);
       setRecording(true);
       setElapsed(0);
+      setLiveSegments([]);
+      startRecognition();
       timerRef.current = setInterval(() => {
         setElapsed(Math.floor((Date.now() - startTsRef.current) / 1000));
       }, 1000);
@@ -303,6 +487,46 @@ export function MeetingPanel({
                 <p className="text-[11px] text-muted-foreground/70">
                   视频时长而定，通常 1-3 分钟。
                 </p>
+              </div>
+            )}
+
+            {/* Live single-speaker transcript — only visible while
+                recording. After stop, the server-side (Doubao) diarized
+                transcript takes over via <TranscriptView /> below. */}
+            {recording && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                  <span>实时转写 · 说话人日志</span>
+                  {!speechSupported && (
+                    <span className="text-destructive normal-case font-sans">
+                      浏览器不支持实时转写
+                    </span>
+                  )}
+                </div>
+                {speechSupported && liveSegments.length === 0 && (
+                  <div className="text-[11px] text-muted-foreground/70 px-2 py-2 border border-dashed border-border rounded">
+                    开始说话，转写会实时显示在这里。
+                  </div>
+                )}
+                {liveSegments.length > 0 && (
+                  <ul className="space-y-1 max-h-60 overflow-y-auto rounded bg-muted/20 p-2">
+                    {liveSegments.map((seg) => (
+                      <li key={seg.id} className="text-[11px] leading-snug">
+                        <span className="text-primary font-mono mr-1">
+                          {seg.speaker}:
+                        </span>
+                        <span className={seg.interim ? "text-muted-foreground" : ""}>
+                          {seg.text}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {!speechSupported && (
+                  <p className="text-[10px] text-muted-foreground/70">
+                    当前浏览器未提供本地语音识别。录音结束后仍会通过服务端转写生成完整日志。
+                  </p>
+                )}
               </div>
             )}
 

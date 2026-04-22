@@ -431,6 +431,7 @@ func messageToResponse(m db.Message) map[string]any {
 		"file_name":      textToPtr(m.FileName),
 		"status":         m.Status,
 		"parent_id":      uuidToPtr(m.ParentID),
+		"thread_id":      uuidToPtr(m.ThreadID),
 		"type":           m.Type,
 		"created_at":     timestampToString(m.CreatedAt),
 	}

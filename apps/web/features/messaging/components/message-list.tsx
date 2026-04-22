@@ -2,8 +2,11 @@
 import { Check, CheckCheck, MessageSquare } from "lucide-react";
 
 import { useMessageSelectionStore } from "@/features/messaging/stores/selection-store";
+import { useFileViewerStore } from "@/features/messaging/stores/file-viewer-store";
 import { useWorkspaceStore } from "@/features/workspace";
 import { MemoizedMarkdown } from "@/components/markdown";
+import { MeetingBubble } from "./meeting-bubble";
+import type { ChannelMeeting } from "@/shared/types";
 
 type MessageStatus = "sent" | "delivered" | "read";
 
@@ -16,6 +19,8 @@ interface MessageListProps {
     created_at: string;
     file_name?: string;
     file_id?: string;
+    file_size?: number;
+    file_content_type?: string;
     reply_count?: number;
     is_impersonated?: boolean;
     status?: MessageStatus;
@@ -33,6 +38,11 @@ interface MessageListProps {
   // subset to feed into "Generate Project from selection". Owned by the
   // session page; this component just reflects the parent's intent.
   selectionEnabled?: boolean;
+  // Channel meetings are interleaved into the message stream by
+  // started_at so a meeting shows up inline as a summary bubble at the
+  // moment it was started.
+  meetings?: ChannelMeeting[];
+  onOpenMeeting?: (meetingId: string) => void;
 }
 
 // MessageStatusIndicator renders sent / delivered / read icons on the
@@ -62,10 +72,11 @@ function MessageStatusIndicator({ status }: { status?: MessageStatus }) {
   );
 }
 
-export function MessageList({ messages, currentUserId, onOpenThread, typingUsers = [], selectionEnabled = false }: MessageListProps) {
+export function MessageList({ messages, currentUserId, onOpenThread, typingUsers = [], selectionEnabled = false, meetings = [], onOpenMeeting }: MessageListProps) {
   const members = useWorkspaceStore((s) => s.members);
   const selectedIds = useMessageSelectionStore((s) => s.selectedIds);
   const toggleSelection = useMessageSelectionStore((s) => s.toggle);
+  const openFile = useFileViewerStore((s) => s.open);
 
   const resolveDisplayName = (senderId: string): string => {
     const member = members.find((m) => m.user_id === senderId);
@@ -89,9 +100,43 @@ export function MessageList({ messages, currentUserId, onOpenThread, typingUsers
     (m) => !m.thread_id || m.thread_id === m.id,
   );
 
+  // Interleave meeting bubbles by started_at so they land next to the
+  // messages posted around the same time. Parse timestamps into epoch
+  // millis so malformed / non-ISO strings don't produce the wrong order
+  // under a lexical compare; NaN parses sort to the end, and we tie-break
+  // on entry id to keep equal-timestamp pairs in a stable order across
+  // renders.
+  type TimelineItem =
+    | { kind: "msg"; ts: string; data: MessageListProps["messages"][number] }
+    | { kind: "meeting"; ts: string; data: ChannelMeeting };
+  const timeline: TimelineItem[] = [
+    ...rootMessages.map<TimelineItem>((m) => ({ kind: "msg", ts: m.created_at, data: m })),
+    ...meetings.map<TimelineItem>((m) => ({ kind: "meeting", ts: m.started_at, data: m })),
+  ].sort((a, b) => {
+    const ta = Date.parse(a.ts);
+    const tb = Date.parse(b.ts);
+    const aNaN = Number.isNaN(ta);
+    const bNaN = Number.isNaN(tb);
+    if (aNaN && bNaN) return a.data.id < b.data.id ? -1 : a.data.id > b.data.id ? 1 : 0;
+    if (aNaN) return 1;
+    if (bNaN) return -1;
+    if (ta !== tb) return ta - tb;
+    return a.data.id < b.data.id ? -1 : a.data.id > b.data.id ? 1 : 0;
+  });
+
   return (
     <div className="flex-1 overflow-auto p-4 space-y-1">
-      {rootMessages.map((msg) => {
+      {timeline.map((item) => {
+        if (item.kind === "meeting") {
+          return (
+            <MeetingBubble
+              key={`meeting-${item.data.id}`}
+              meeting={item.data}
+              onOpen={(id) => onOpenMeeting?.(id)}
+            />
+          );
+        }
+        const msg = item.data;
         const isSelected = selectedIds.has(msg.id);
         // Merge server-provided count with the client-side tally so
         // threads whose replies are on the current page still render
@@ -146,10 +191,18 @@ export function MessageList({ messages, currentUserId, onOpenThread, typingUsers
 
               {/* Content — markdown rendered so agents can return
                   headings / code blocks / lists and they display
-                  properly rather than as a wall of raw '##' text. */}
-              <div className="text-[14px] text-foreground leading-relaxed prose prose-sm max-w-none dark:prose-invert">
-                <MemoizedMarkdown mode="minimal">{msg.content}</MemoizedMarkdown>
-              </div>
+                  properly rather than as a wall of raw '##' text.
+
+                  File-attachment messages often echo the filename in
+                  `content`. Suppress that duplicate, otherwise linkify
+                  auto-detects the ".md" / ".pdf" suffix as a fuzzy URL
+                  and a click hijacks the browser to http://<filename>/
+                  instead of opening the inline viewer. */}
+              {msg.content && msg.content.trim() !== (msg.file_name ?? "").trim() && (
+                <div className="text-[14px] text-foreground leading-relaxed prose prose-sm max-w-none dark:prose-invert">
+                  <MemoizedMarkdown mode="minimal">{msg.content}</MemoizedMarkdown>
+                </div>
+              )}
 
               {/* Read/delivered status — only shown on messages the current
                   user sent, so the recipient doesn't see ticks next to
@@ -160,11 +213,32 @@ export function MessageList({ messages, currentUserId, onOpenThread, typingUsers
                 </div>
               )}
 
-              {/* File attachment */}
+              {/* File attachment — clicking opens the inline FileViewerPanel
+                  on the right. Fall back to a plain chip when there's no
+                  file_id (legacy rows). */}
               {msg.file_name && (
-                <div className="mt-1 flex items-center gap-1.5 text-[12px] text-muted-foreground bg-secondary rounded-[4px] px-2 py-1 w-fit">
-                  📎 {msg.file_name}
-                </div>
+                msg.file_id ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openFile({
+                        file_id: msg.file_id!,
+                        file_name: msg.file_name!,
+                        file_size: msg.file_size,
+                        file_content_type: msg.file_content_type,
+                      })
+                    }
+                    className="mt-1 flex items-center gap-1.5 text-[12px] text-muted-foreground bg-secondary hover:bg-secondary/80 hover:text-foreground rounded-[4px] px-2 py-1 w-fit transition-colors"
+                    title="预览文件"
+                  >
+                    <span>📎</span>
+                    <span className="underline-offset-2 hover:underline">{msg.file_name}</span>
+                  </button>
+                ) : (
+                  <div className="mt-1 flex items-center gap-1.5 text-[12px] text-muted-foreground bg-secondary rounded-[4px] px-2 py-1 w-fit">
+                    📎 {msg.file_name}
+                  </div>
+                )
               )}
 
               {/* Thread indicator */}

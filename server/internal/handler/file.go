@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/storage"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -97,7 +98,35 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The /api/upload-file route lives outside the workspace middleware so
+	// that avatar uploads work without a workspace context. That leaves
+	// the middleware-populated context empty for normal chat uploads, so
+	// fall back to the X-Workspace-ID header (or workspace_id query) to
+	// recover enough context to create the attachment row that powers the
+	// message file_id and the inline file-viewer panel.
 	workspaceID := resolveWorkspaceID(r)
+	if workspaceID == "" {
+		if hdr := r.Header.Get("X-Workspace-ID"); hdr != "" {
+			workspaceID = hdr
+		} else if qp := r.URL.Query().Get("workspace_id"); qp != "" {
+			workspaceID = qp
+		}
+	}
+
+	// When a workspace context was resolved from any source, verify the
+	// authenticated user is actually a member of that workspace before we
+	// create an attachment row in it. Otherwise a user could inject a
+	// foreign workspace_id via header/query and write into a workspace
+	// they don't belong to.
+	if workspaceID != "" {
+		if _, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+			UserID:      parseUUID(userID),
+			WorkspaceID: parseUUID(workspaceID),
+		}); err != nil {
+			writeError(w, http.StatusForbidden, "not a member of the target workspace")
+			return
+		}
+	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
 
@@ -289,6 +318,69 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 
 	h.deleteS3Object(r.Context(), att.Url)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------------------
+// DownloadFile — GET /api/files/{id}/download
+//
+// Streams the stored attachment back through the API so the web client can
+// render md/csv/text inline in the file-viewer panel without requiring a
+// signed CDN URL. Without this, browsers fetching the raw object store URL
+// hit 403 (public access is disabled) and the panel reports "Failed to
+// fetch".
+// ---------------------------------------------------------------------------
+
+func (h *Handler) DownloadFile(w http.ResponseWriter, r *http.Request) {
+	if h.Storage == nil {
+		writeError(w, http.StatusServiceUnavailable, "file storage not configured")
+		return
+	}
+
+	fileID := chi.URLParam(r, "id")
+	workspaceID := resolveWorkspaceID(r)
+	if workspaceID == "" {
+		workspaceID = r.Header.Get("X-Workspace-ID")
+	}
+	if workspaceID == "" {
+		workspaceID = r.URL.Query().Get("workspace_id")
+	}
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+
+	att, err := h.Queries.GetAttachment(r.Context(), db.GetAttachmentParams{
+		ID:          parseUUID(fileID),
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
+
+	key := h.Storage.KeyFromURL(att.Url)
+	body, contentType, contentLength, err := h.Storage.Download(r.Context(), key)
+	if err != nil {
+		slog.Error("download failed", "file_id", fileID, "error", err)
+		writeError(w, http.StatusBadGateway, "failed to fetch object")
+		return
+	}
+	defer body.Close()
+
+	if contentType == "" {
+		contentType = att.ContentType
+	}
+	w.Header().Set("Content-Type", contentType)
+	if contentLength > 0 {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", contentLength))
+	}
+	w.Header().Set("Cache-Control", "private, max-age=60")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, storage.SanitizeFilename(att.Filename)))
+	w.WriteHeader(http.StatusOK)
+	if _, err := io.Copy(w, body); err != nil {
+		slog.Debug("download copy aborted", "file_id", fileID, "error", err)
+	}
 }
 
 // ---------------------------------------------------------------------------

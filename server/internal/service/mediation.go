@@ -891,10 +891,20 @@ func parseMentionsFromContent(text string, agents []db.Agent) []string {
 
 // messageFromMap reconstructs a db.Message from the event payload's
 // message map. We accept partial fields and zero-value the rest.
+//
+// Payload values arrive from messageToResponse which encodes UUIDs as
+// *string for JSON null-semantics; accept both bare strings and *string
+// so the reconstructed message keeps a valid ChannelID / ThreadID.
 func messageFromMap(m map[string]any, workspaceID string) db.Message {
 	asString := func(k string) string {
-		if v, ok := m[k].(string); ok {
+		switch v := m[k].(type) {
+		case string:
 			return v
+		case *string:
+			if v == nil {
+				return ""
+			}
+			return *v
 		}
 		return ""
 	}

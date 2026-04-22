@@ -6,7 +6,10 @@ import { Button } from "@/components/ui/button"
 import { api } from "@/shared/api"
 import { toast } from "sonner"
 import type { FileVersion } from "@/shared/types"
+import { formatSize, getFileIcon } from "@/shared/file-display"
 import { MemoriesTab } from "@/features/memories/components/memories-tab"
+import { FileViewerPanel } from "@/features/messaging/components/file-viewer-panel"
+import { useFileViewerStore } from "@/features/messaging/stores/file-viewer-store"
 
 type Tab = "files" | "memories"
 
@@ -18,19 +21,6 @@ interface FileItem {
   url?: string
   source_type?: string
   created_at: string
-}
-
-const FILE_ICONS: Record<string, string> = {
-  pdf: "📕", doc: "📘", docx: "📘", xls: "📗", xlsx: "📗", csv: "📊",
-  png: "🖼️", jpg: "🖼️", jpeg: "🖼️", gif: "🖼️", svg: "🖼️",
-  ts: "🟦", tsx: "🟦", js: "🟨", jsx: "🟨", py: "🐍", go: "🔵", rs: "🦀",
-  zip: "📦", tar: "📦", gz: "📦", rar: "📦",
-  md: "📝", txt: "📝", json: "📝", yaml: "📝", yml: "📝",
-}
-
-function getIcon(name: string) {
-  const ext = name.split(".").pop()?.toLowerCase() ?? ""
-  return FILE_ICONS[ext] ?? "📄"
 }
 
 function FileVersionHistory({ fileId }: { fileId: string }) {
@@ -111,13 +101,6 @@ function FileVersionHistory({ fileId }: { fileId: string }) {
   )
 }
 
-function formatSize(bytes?: number) {
-  if (!bytes) return ""
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1048576).toFixed(1)} MB`
-}
-
 function timeAgo(dateStr: string) {
   const diff = Date.now() - new Date(dateStr).getTime()
   const min = Math.floor(diff / 60000)
@@ -180,12 +163,21 @@ export default function FilesPage() {
   )
 }
 
+function FilesViewerPanel() {
+  const activeFile = useFileViewerStore((s) => s.active)
+  const closeFileViewer = useFileViewerStore((s) => s.close)
+  if (!activeFile) return null
+  return <FileViewerPanel target={activeFile} onClose={closeFileViewer} />
+}
+
 function FilesTab() {
   const [files, setFiles] = useState<FileItem[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [expandedFileId, setExpandedFileId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const openFile = useFileViewerStore((s) => s.open)
+  const activeFileId = useFileViewerStore((s) => s.active?.file_id ?? null)
 
   const loadFiles = useCallback(async () => {
     try {
@@ -269,7 +261,8 @@ function FilesTab() {
   }
 
   return (
-    <div className="flex-1 overflow-auto p-6">
+    <div className="flex flex-1 min-h-0 overflow-hidden">
+      <div className="flex-1 overflow-auto p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-foreground">文件 ({files.length})</h1>
         <div>
@@ -298,8 +291,19 @@ function FilesTab() {
         {files.map((f) => (
           <div key={f.id}>
             <div
-              className="flex items-center gap-3 p-3 rounded-[8px] border border-border hover:bg-secondary/50 transition-colors cursor-pointer"
-              onClick={() => toggleExpanded(f.id)}
+              className={`flex items-center gap-3 p-3 rounded-[8px] border transition-colors cursor-pointer ${
+                activeFileId === f.id
+                  ? "border-primary bg-secondary/60"
+                  : "border-border hover:bg-secondary/50"
+              }`}
+              onClick={() =>
+                openFile({
+                  file_id: f.id,
+                  file_name: f.file_name,
+                  file_size: f.file_size,
+                  file_content_type: f.content_type,
+                })
+              }
             >
               <button
                 className="shrink-0 text-muted-foreground hover:text-foreground"
@@ -311,7 +315,7 @@ function FilesTab() {
                   <ChevronRight className="h-4 w-4" />
                 )}
               </button>
-              <span className="text-2xl shrink-0">{getIcon(f.file_name)}</span>
+              <span className="text-2xl shrink-0">{getFileIcon(f.file_name)}</span>
               <div className="flex-1 min-w-0">
                 <div className="font-medium truncate text-foreground text-[14px]">{f.file_name}</div>
                 <div className="text-[12px] text-muted-foreground flex items-center gap-2">
@@ -356,6 +360,8 @@ function FilesTab() {
           </div>
         ))}
       </div>
+      </div>
+      <FilesViewerPanel />
     </div>
   )
 }

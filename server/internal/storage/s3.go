@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -92,8 +93,8 @@ func NewS3StorageFromEnv() *S3Storage {
 	}
 }
 
-// sanitizeFilename removes characters that could cause header injection in Content-Disposition.
-func sanitizeFilename(name string) string {
+// SanitizeFilename removes characters that could cause header injection in Content-Disposition.
+func SanitizeFilename(name string) string {
 	var b strings.Builder
 	b.Grow(len(name))
 	for _, r := range name {
@@ -126,6 +127,27 @@ func (s *S3Storage) KeyFromURL(rawURL string) string {
 	return rawURL
 }
 
+// Download streams an object from S3/TOS. Callers must Close the body.
+// The content-type is returned so the proxy endpoint can forward it.
+func (s *S3Storage) Download(ctx context.Context, key string) (body io.ReadCloser, contentType string, contentLength int64, err error) {
+	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, "", 0, fmt.Errorf("s3 GetObject: %w", err)
+	}
+	ct := ""
+	if out.ContentType != nil {
+		ct = *out.ContentType
+	}
+	var cl int64
+	if out.ContentLength != nil {
+		cl = *out.ContentLength
+	}
+	return out.Body, ct, cl, nil
+}
+
 // Delete removes an object from S3. Errors are logged but not fatal.
 func (s *S3Storage) Delete(ctx context.Context, key string) {
 	if key == "" {
@@ -148,7 +170,7 @@ func (s *S3Storage) DeleteKeys(ctx context.Context, keys []string) {
 }
 
 func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
-	safe := sanitizeFilename(filename)
+	safe := SanitizeFilename(filename)
 	input := &s3.PutObjectInput{
 		Bucket:             aws.String(s.bucket),
 		Key:                aws.String(key),
