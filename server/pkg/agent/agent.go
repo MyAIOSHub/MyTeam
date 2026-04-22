@@ -28,6 +28,11 @@ type ExecOptions struct {
 	MaxTurns        int
 	Timeout         time.Duration
 	ResumeSessionID string // if non-empty, resume a previous agent session
+	// SessionKey, if non-empty and the backend is "claude-persistent", causes
+	// the backend to look up (or spawn) a long-lived child process keyed by
+	// this string and reuse it across turns. Ignored by other backends and
+	// by the single-shot "claude" backend.
+	SessionKey string
 }
 
 // Session represents a running agent execution.
@@ -90,12 +95,14 @@ func New(agentType string, cfg Config) (Backend, error) {
 	switch agentType {
 	case "claude":
 		return &claudeBackend{cfg: cfg}, nil
+	case "claude-persistent":
+		return newClaudePersistentBackend(cfg), nil
 	case "codex":
 		return &codexBackend{cfg: cfg}, nil
 	case "opencode":
 		return &opencodeBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, opencode, cloud)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, claude-persistent, codex, opencode, cloud)", agentType)
 	}
 }
 
