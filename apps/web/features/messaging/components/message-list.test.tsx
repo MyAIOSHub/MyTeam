@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MessageList } from "./message-list";
+import { useFileViewerStore } from "@/features/messaging/stores/file-viewer-store";
 
 // Mock workspace store so resolveDisplayName works
 vi.mock("@/features/workspace", () => ({
@@ -64,5 +65,50 @@ describe("MessageList", () => {
     // Clicking the thread button calls onOpenThread with the message id
     await user.click(threadButton);
     expect(onOpenThread).toHaveBeenCalledWith("root-message");
+  });
+
+  describe("file attachment", () => {
+    beforeEach(() => {
+      useFileViewerStore.getState().close();
+    });
+
+    it("clicking a file chip opens the file viewer with full target metadata", async () => {
+      const user = userEvent.setup();
+      const msg = {
+        ...buildMessage({ id: "m-file", content: "see attached" }),
+        file_id: "att-123",
+        file_name: "report.md",
+        file_size: 4096,
+        file_content_type: "text/markdown",
+      };
+
+      render(<MessageList messages={[msg]} />);
+
+      const chip = screen.getByTitle("预览文件");
+      expect(chip.tagName).toBe("BUTTON");
+      expect(chip).toHaveTextContent("report.md");
+      expect(useFileViewerStore.getState().active).toBeNull();
+
+      await user.click(chip);
+
+      expect(useFileViewerStore.getState().active).toEqual({
+        file_id: "att-123",
+        file_name: "report.md",
+        file_size: 4096,
+        file_content_type: "text/markdown",
+      });
+    });
+
+    it("renders non-interactive chip when file_id is missing", () => {
+      const msg = {
+        ...buildMessage({ id: "m-legacy", content: "legacy attachment" }),
+        file_name: "legacy.md",
+      };
+
+      render(<MessageList messages={[msg]} />);
+
+      expect(screen.queryByTitle("预览文件")).toBeNull();
+      expect(screen.getByText(/legacy\.md/)).toBeInTheDocument();
+    });
   });
 });

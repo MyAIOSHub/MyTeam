@@ -868,8 +868,44 @@ export class ApiClient implements ApiTransport {
   }
 
   async listFileVersions(fileId: string): Promise<FileVersion[]> {
-    return this.fetch(`/api/files/${fileId}/versions`);
+    const res = await this.fetch<{ versions?: FileVersion[] } | FileVersion[]>(
+      `/api/files/${fileId}/versions`,
+    );
+    if (Array.isArray(res)) return res;
+    return res?.versions ?? [];
   }
+
+  // downloadFileText streams the file through the API and returns its text.
+  // Used by the inline file viewer for md / txt / csv / code so we don't have
+  // to hit the raw object-store URL (which returns 403 without CDN signing).
+  async downloadFileText(fileId: string): Promise<string> {
+    const res = await this.downloadFileResponse(fileId);
+    return res.text();
+  }
+
+  async downloadFileBlob(fileId: string): Promise<Blob> {
+    const res = await this.downloadFileResponse(fileId);
+    return res.blob();
+  }
+
+  async downloadFileArrayBuffer(fileId: string): Promise<ArrayBuffer> {
+    const res = await this.downloadFileResponse(fileId);
+    return res.arrayBuffer();
+  }
+
+  private async downloadFileResponse(fileId: string): Promise<Response> {
+    const res = await fetch(`${this.baseUrl}/api/files/${fileId}/download`, {
+      headers: this.getAuthHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      if (res.status === 401) this.handleUnauthorized();
+      const message = await this.parseErrorMessage(res, `Download failed: ${res.status}`);
+      throw new Error(message);
+    }
+    return res;
+  }
+
 
   // Messages
   async sendMessage(data: { channel_id?: string; recipient_id?: string; recipient_type?: string; thread_id?: string; content: string; content_type?: string; file_id?: string; file_name?: string }) {
