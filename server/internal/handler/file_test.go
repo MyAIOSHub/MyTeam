@@ -296,6 +296,54 @@ func TestDownloadFile_HappyPath(t *testing.T) {
 	}
 }
 
+// TestDownloadFile_ContentTypeFallback verifies the handler falls back to the
+// attachment row's stored ContentType when the storage layer returns an empty
+// contentType (covers file.go:380-382). We need a fake S3 that genuinely omits
+// Content-Type on the wire — net/http auto-sniffs a non-empty body and fills
+// Content-Type if the handler hasn't written one, which would defeat the test.
+// Setting the header slot to nil explicitly suppresses the auto-detect.
+func TestDownloadFile_ContentTypeFallback(t *testing.T) {
+	const payload = "body-bytes"
+	const attachmentCT = "application/x-multica-fallback"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Explicitly nil out the Content-Type slot so net/http does not
+		// auto-sniff from the body on WriteHeader.
+		w.Header()["Content-Type"] = nil
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, payload)
+	}))
+	defer srv.Close()
+
+	t.Setenv("S3_BUCKET", "test-bucket")
+	t.Setenv("S3_REGION", "us-east-1")
+	t.Setenv("S3_ENDPOINT", srv.URL)
+	t.Setenv("S3_USE_PATH_STYLE", "true")
+	t.Setenv("AWS_ACCESS_KEY_ID", "test-key")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret")
+	t.Setenv("CLOUDFRONT_DOMAIN", "")
+	s3 := storage.NewS3StorageFromEnv()
+	if s3 == nil {
+		t.Fatal("NewS3StorageFromEnv returned nil")
+	}
+	withStorage(t, s3)
+
+	attID := insertAttachment(t, testWorkspaceID, testUserID, "member", "fallback.bin", "fallback.bin", attachmentCT)
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/files/"+attID+"/download", nil)
+	req = withURLParam(req, "id", attID)
+	testHandler.DownloadFile(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); got != attachmentCT {
+		t.Errorf("Content-Type = %q, want fallback %q", got, attachmentCT)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // ListOwnerAndAgentFiles
 // ---------------------------------------------------------------------------
