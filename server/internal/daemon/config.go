@@ -20,6 +20,13 @@ const (
 	DefaultWorkspaceSyncInterval = 30 * time.Second
 	DefaultHealthPort            = 19514
 	DefaultMaxConcurrentTasks    = 20
+
+	// ClaudeModeSingle is the default. Each task spawns a fresh `claude` process.
+	ClaudeModeSingle = "single"
+	// ClaudeModePersistent reuses a long-lived `claude` process per (agent, issue)
+	// across turns. Opt-in via MULTICA_CLAUDE_MODE=persistent. On spawn failure
+	// the daemon falls back to single-shot for that task.
+	ClaudeModePersistent = "persistent"
 )
 
 // Config holds all daemon configuration.
@@ -35,6 +42,7 @@ type Config struct {
 	KeepEnvAfterTask   bool                  // preserve env after task for debugging
 	HealthPort         int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks int                   // max tasks running in parallel (default: 20)
+	ClaudeMode         string                // "single" (default) or "persistent"
 	PollInterval       time.Duration
 	HeartbeatInterval  time.Duration
 	AgentTimeout       time.Duration
@@ -189,6 +197,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// Keep env after task: env > default (false)
 	keepEnv := os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "true" || os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "1"
 
+	// Claude execution mode: env > default ("single"). Unknown values fall
+	// through to "single" so a typo never silently enables persistent mode.
+	claudeMode := strings.ToLower(strings.TrimSpace(os.Getenv("MULTICA_CLAUDE_MODE")))
+	if claudeMode != ClaudeModePersistent {
+		claudeMode = ClaudeModeSingle
+	}
+
 	return Config{
 		ServerBaseURL:      serverBaseURL,
 		DaemonID:           daemonID,
@@ -200,6 +215,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		KeepEnvAfterTask:   keepEnv,
 		HealthPort:         healthPort,
 		MaxConcurrentTasks: maxConcurrentTasks,
+		ClaudeMode:         claudeMode,
 		PollInterval:       pollInterval,
 		HeartbeatInterval:  heartbeatInterval,
 		AgentTimeout:       agentTimeout,
