@@ -101,15 +101,28 @@ export function MessageList({ messages, currentUserId, onOpenThread, typingUsers
   );
 
   // Interleave meeting bubbles by started_at so they land next to the
-  // messages posted around the same time. We compare ISO strings — valid
-  // because all timestamps are UTC-normalized.
+  // messages posted around the same time. Parse timestamps into epoch
+  // millis so malformed / non-ISO strings don't produce the wrong order
+  // under a lexical compare; NaN parses sort to the end, and we tie-break
+  // on entry id to keep equal-timestamp pairs in a stable order across
+  // renders.
   type TimelineItem =
     | { kind: "msg"; ts: string; data: MessageListProps["messages"][number] }
     | { kind: "meeting"; ts: string; data: ChannelMeeting };
   const timeline: TimelineItem[] = [
     ...rootMessages.map<TimelineItem>((m) => ({ kind: "msg", ts: m.created_at, data: m })),
     ...meetings.map<TimelineItem>((m) => ({ kind: "meeting", ts: m.started_at, data: m })),
-  ].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  ].sort((a, b) => {
+    const ta = Date.parse(a.ts);
+    const tb = Date.parse(b.ts);
+    const aNaN = Number.isNaN(ta);
+    const bNaN = Number.isNaN(tb);
+    if (aNaN && bNaN) return a.data.id < b.data.id ? -1 : a.data.id > b.data.id ? 1 : 0;
+    if (aNaN) return 1;
+    if (bNaN) return -1;
+    if (ta !== tb) return ta - tb;
+    return a.data.id < b.data.id ? -1 : a.data.id > b.data.id ? 1 : 0;
+  });
 
   return (
     <div className="flex-1 overflow-auto p-4 space-y-1">

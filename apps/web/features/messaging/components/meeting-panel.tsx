@@ -97,6 +97,12 @@ export function MeetingPanel({
   const [liveSegments, setLiveSegments] = useState<LiveSegment[]>([]);
   const [speechSupported, setSpeechSupported] = useState(true);
   const recognitionRef = useRef<WebSpeechRecognition | null>(null);
+  // Consecutive-failure backoff: if start() throws or onend fires again
+  // within 1s of last start, increment. At ≥ 3 failures inside a 1s
+  // window, stop restarting + flip speechSupported=false so the UI
+  // fallback message renders.
+  const failureCountRef = useRef(0);
+  const lastStartTsRef = useRef(0);
   const currentUser = useAuthStore((s) => s.user);
   const speakerName = currentUser?.name ?? currentUser?.email ?? "我";
 
@@ -194,7 +200,19 @@ export function MeetingPanel({
       });
     };
     rec.onerror = (ev: WebSpeechErrorEvent) => {
-      if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
+      // Fatal codes — user denied mic, service unavailable, or the
+      // audio device is gone. Detach onend + null the ref BEFORE
+      // returning so the reference-equality guard in onend can't
+      // re-enter and tight-loop rec.start().
+      if (
+        ev.error === "not-allowed" ||
+        ev.error === "service-not-allowed" ||
+        ev.error === "audio-capture"
+      ) {
+        rec.onend = null;
+        if (recognitionRef.current === rec) {
+          recognitionRef.current = null;
+        }
         setSpeechSupported(false);
       }
     };
@@ -202,15 +220,37 @@ export function MeetingPanel({
       // Auto-restart while the MediaRecorder is still active — the Web
       // Speech API stops itself after silence or long recognition spans
       // and we want the live feed to keep ticking.
-      if (recognitionRef.current === rec && streamRef.current) {
-        try {
-          rec.start();
-        } catch {
-          /* already started */
+      if (recognitionRef.current !== rec || !streamRef.current) return;
+      // Consecutive-failure backoff: if onend fires within 1s of the
+      // last start, count it as a failure. ≥ 3 inside a 1s window →
+      // stop and surface the unsupported fallback.
+      const now = Date.now();
+      if (now - lastStartTsRef.current < 1000) {
+        failureCountRef.current += 1;
+      } else {
+        failureCountRef.current = 0;
+      }
+      if (failureCountRef.current >= 3) {
+        rec.onend = null;
+        recognitionRef.current = null;
+        setSpeechSupported(false);
+        return;
+      }
+      try {
+        lastStartTsRef.current = Date.now();
+        rec.start();
+      } catch {
+        failureCountRef.current += 1;
+        if (failureCountRef.current >= 3) {
+          rec.onend = null;
+          recognitionRef.current = null;
+          setSpeechSupported(false);
         }
       }
     };
     try {
+      failureCountRef.current = 0;
+      lastStartTsRef.current = Date.now();
       rec.start();
       recognitionRef.current = rec;
     } catch {

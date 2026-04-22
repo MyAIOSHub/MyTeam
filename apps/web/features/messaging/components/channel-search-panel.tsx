@@ -18,12 +18,11 @@ export function ChannelSearchPanel({ messages, onClose, onJumpToMessage }: Chann
   const resolveName = (senderId: string) =>
     members.find((m) => m.user_id === senderId)?.name ?? senderId.slice(0, 8);
 
-  const results = useMemo(() => {
+  const { results, totalMatches } = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return [] as Message[];
-    return messages
-      .filter((m) => (m.content ?? "").toLowerCase().includes(q))
-      .slice(0, 200);
+    if (!q) return { results: [] as Message[], totalMatches: 0 };
+    const all = messages.filter((m) => (m.content ?? "").toLowerCase().includes(q));
+    return { results: all.slice(0, 200), totalMatches: all.length };
   }, [messages, query]);
 
   return (
@@ -54,7 +53,11 @@ export function ChannelSearchPanel({ messages, onClose, onJumpToMessage }: Chann
           />
         </div>
         <div className="mt-1 text-[11px] text-muted-foreground">
-          {query.trim() ? `${results.length} 条匹配` : `当前频道共 ${messages.length} 条消息`}
+          {query.trim()
+            ? totalMatches > 200
+              ? `${totalMatches} 条匹配（只显示前 200 条）`
+              : `${totalMatches} 条匹配`
+            : `当前频道共 ${messages.length} 条消息`}
         </div>
       </div>
       <div className="flex-1 overflow-auto">
