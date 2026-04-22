@@ -11,6 +11,10 @@ import { MessageList } from "@/features/messaging/components/message-list";
 import { MessageInput } from "@/features/messaging/components/message-input";
 import { ThreadPanel } from "@/features/messaging/components/thread-panel";
 import { MeetingPanel } from "@/features/messaging/components/meeting-panel";
+import { FileViewerPanel } from "@/features/messaging/components/file-viewer-panel";
+import { ChannelSearchPanel } from "@/features/messaging/components/channel-search-panel";
+import { ChannelFilesPanel } from "@/features/messaging/components/channel-files-panel";
+import { useFileViewerStore } from "@/features/messaging/stores/file-viewer-store";
 import { GenerateProjectButton } from "@/features/messaging/components/generate-project-button";
 import { PromoteToChannelButton } from "@/features/messaging/components/promote-to-channel-button";
 import { InviteChannelMemberDialog } from "@/features/messaging/components/invite-channel-member-dialog";
@@ -22,7 +26,7 @@ import { api } from "@/shared/api";
 import type { Conversation } from "@/shared/types/messaging";
 import type { Message } from "@/shared/types/messaging";
 import type { Channel } from "@/shared/types/messaging";
-import type { InboxItem } from "@/shared/types";
+import type { InboxItem, ChannelMeeting } from "@/shared/types";
 import { toast } from "sonner";
 import {
   Hash,
@@ -34,6 +38,7 @@ import {
   Users,
   Archive,
   Search,
+  FolderOpen,
   Plus,
   UserPlus,
   Mic,
@@ -663,6 +668,78 @@ export default function SessionPage() {
   // Thread state
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [meetingPanelOpen, setMeetingPanelOpen] = useState(false);
+  const [searchPanelOpen, setSearchPanelOpen] = useState(false);
+  const [filesPanelOpen, setFilesPanelOpen] = useState(false);
+  const [initialMeetingId, setInitialMeetingId] = useState<string | null>(null);
+  const [channelMeetings, setChannelMeetings] = useState<ChannelMeeting[]>([]);
+  const activeFile = useFileViewerStore((s) => s.active);
+  const closeFileViewer = useFileViewerStore((s) => s.close);
+
+  // Right-rail panels share a single slot. Opening one closes the others so
+  // the user doesn't end up with a sliver-wide thread squeezed next to a
+  // search panel.
+  const openExclusivePanel = (which: "thread" | "meeting" | "search" | "files" | null, threadId?: string) => {
+    setActiveThreadId(which === "thread" ? (threadId ?? null) : null);
+    setMeetingPanelOpen(which === "meeting");
+    setSearchPanelOpen(which === "search");
+    setFilesPanelOpen(which === "files");
+    if (which !== "meeting") setInitialMeetingId(null);
+  };
+
+  // Load channel meetings whenever the user flips to a channel. Poll while
+  // any meeting is still recording/processing so the inline bubbles tick
+  // into their final state without a page refresh.
+  useEffect(() => {
+    if (selectedType !== "channel" || !selectedId) {
+      setChannelMeetings([]);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await api.listChannelMeetings(selectedId, 50);
+        if (!cancelled) setChannelMeetings(res.meetings ?? []);
+      } catch {
+        // Best effort — meeting list is non-critical.
+      }
+    };
+    load();
+    const anyActive = (ms: ChannelMeeting[]) =>
+      ms.some((m) => m.status === "recording" || m.status === "processing");
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const schedule = () => {
+      if (timer) clearInterval(timer);
+      timer = setInterval(async () => {
+        try {
+          const res = await api.listChannelMeetings(selectedId, 50);
+          if (cancelled) return;
+          setChannelMeetings(res.meetings ?? []);
+          if (!anyActive(res.meetings ?? []) && timer) {
+            clearInterval(timer);
+            timer = null;
+          }
+        } catch {
+          /* ignore */
+        }
+      }, 4000);
+    };
+    schedule();
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [selectedType, selectedId]);
+
+  const handleOpenMeeting = useCallback(
+    (meetingId: string) => {
+      setInitialMeetingId(meetingId);
+      setActiveThreadId(null);
+      setSearchPanelOpen(false);
+      setFilesPanelOpen(false);
+      setMeetingPanelOpen(true);
+    },
+    [],
+  );
 
   // Threads have their own UUIDs, distinct from the root message. Opening
   // a thread from a message requires creating the thread row first (or
@@ -674,6 +751,9 @@ export default function SessionPage() {
       try {
         const thread = await api.createThread(selectedId, { root_message_id: msgId });
         setActiveThreadId(thread.id);
+        setMeetingPanelOpen(false);
+        setSearchPanelOpen(false);
+        setFilesPanelOpen(false);
       } catch {
         toast.error("打开讨论串失败");
       }
@@ -903,18 +983,30 @@ export default function SessionPage() {
                       <>
                         <button
                           type="button"
-                          onClick={() => {
-                            setMeetingPanelOpen(true);
-                            // Meeting + thread panels share the same
-                            // right-rail slot so opening one closes the
-                            // other.
-                            setActiveThreadId(null);
-                          }}
+                          onClick={() => openExclusivePanel("meeting")}
                           title="开始会议"
                           className="flex items-center gap-1 px-2 h-7 rounded-md text-[12px] text-primary hover:bg-accent transition-colors"
                         >
                           <Mic className="h-3.5 w-3.5" />
                           开始会议
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openExclusivePanel(searchPanelOpen ? null : "search")}
+                          title="搜索聊天记录"
+                          className={`flex items-center gap-1 px-2 h-7 rounded-md text-[12px] hover:bg-accent transition-colors ${searchPanelOpen ? "text-foreground bg-accent" : "text-muted-foreground hover:text-foreground"}`}
+                        >
+                          <Search className="h-3.5 w-3.5" />
+                          搜索
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openExclusivePanel(filesPanelOpen ? null : "files")}
+                          title="查看频道文件"
+                          className={`flex items-center gap-1 px-2 h-7 rounded-md text-[12px] hover:bg-accent transition-colors ${filesPanelOpen ? "text-foreground bg-accent" : "text-muted-foreground hover:text-foreground"}`}
+                        >
+                          <FolderOpen className="h-3.5 w-3.5" />
+                          文件
                         </button>
                         <button
                           type="button"
@@ -956,6 +1048,8 @@ export default function SessionPage() {
                   currentUserId={currentUserId}
                   onOpenThread={selectedType === "channel" ? openThreadForMessage : undefined}
                   selectionEnabled={selectionEnabled}
+                  meetings={selectedType === "channel" ? channelMeetings : []}
+                  onOpenMeeting={selectedType === "channel" ? handleOpenMeeting : undefined}
                   typingUsers={
                     selectedType === "channel"
                       ? channelTyping.typingUsers
@@ -975,8 +1069,27 @@ export default function SessionPage() {
               {meetingPanelOpen && selectedType === "channel" && selectedId && (
                 <MeetingPanel
                   channelId={selectedId}
-                  onClose={() => setMeetingPanelOpen(false)}
+                  initialMeetingId={initialMeetingId}
+                  onClose={() => {
+                    setMeetingPanelOpen(false);
+                    setInitialMeetingId(null);
+                  }}
                 />
+              )}
+              {searchPanelOpen && selectedType === "channel" && (
+                <ChannelSearchPanel
+                  messages={messages}
+                  onClose={() => setSearchPanelOpen(false)}
+                />
+              )}
+              {filesPanelOpen && selectedType === "channel" && (
+                <ChannelFilesPanel
+                  messages={messages}
+                  onClose={() => setFilesPanelOpen(false)}
+                />
+              )}
+              {activeFile && (
+                <FileViewerPanel target={activeFile} onClose={closeFileViewer} />
               )}
             </div>
 
