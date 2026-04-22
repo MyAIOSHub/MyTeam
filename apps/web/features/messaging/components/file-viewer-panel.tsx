@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { api } from "@/shared/api";
 import type { FileVersion } from "@/shared/types";
+import { formatSize } from "@/shared/file-display";
 import { MemoizedMarkdown } from "@/components/markdown";
 import type { FileViewerTarget } from "@/features/messaging/stores/file-viewer-store";
 
@@ -49,13 +50,6 @@ export function detectKind(name: string, mime?: string): Kind {
   if (DATA_EXT.has(ext)) return "code";
   if (TEXT_EXT.has(ext) || mime?.startsWith("text/")) return "text";
   return "unknown";
-}
-
-function formatSize(bytes?: number) {
-  if (!bytes && bytes !== 0) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1_048_576).toFixed(1)} MB`;
 }
 
 function typeBadge(kind: Kind, ext: string) {

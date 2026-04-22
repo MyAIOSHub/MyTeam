@@ -6,27 +6,11 @@ import { FileText, X } from "lucide-react";
 import type { Message } from "@/shared/types/messaging";
 import { useWorkspaceStore } from "@/features/workspace";
 import { useFileViewerStore } from "@/features/messaging/stores/file-viewer-store";
+import { formatSize, getFileIcon } from "@/shared/file-display";
 
 interface ChannelFilesPanelProps {
   messages: Message[];
   onClose: () => void;
-}
-
-function formatSize(bytes?: number) {
-  if (bytes == null) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1_048_576).toFixed(1)} MB`;
-}
-
-function iconForName(name: string) {
-  const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  const map: Record<string, string> = {
-    pdf: "📕", doc: "📘", docx: "📘", xls: "📗", xlsx: "📗", csv: "📊",
-    png: "🖼️", jpg: "🖼️", jpeg: "🖼️", gif: "🖼️", svg: "🖼️", webp: "🖼️",
-    md: "📝", txt: "📝", json: "📝", yaml: "📝", yml: "📝", html: "🌐", htm: "🌐",
-  };
-  return map[ext] ?? "📄";
 }
 
 export function ChannelFilesPanel({ messages, onClose }: ChannelFilesPanelProps) {
@@ -82,7 +66,7 @@ export function ChannelFilesPanel({ messages, onClose }: ChannelFilesPanelProps)
                   className="w-full text-left rounded-md px-2 py-2 hover:bg-accent/50 transition-colors flex items-start gap-2"
                   title="打开文件预览"
                 >
-                  <span className="text-lg leading-none shrink-0 mt-0.5">{iconForName(msg.file_name!)}</span>
+                  <span className="text-lg leading-none shrink-0 mt-0.5">{getFileIcon(msg.file_name!)}</span>
                   <div className="min-w-0 flex-1">
                     <div className="text-[13px] text-foreground truncate">{msg.file_name}</div>
                     <div className="text-[11px] text-muted-foreground truncate">

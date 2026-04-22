@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { api } from "@/shared/api"
 import { toast } from "sonner"
 import type { FileVersion } from "@/shared/types"
+import { formatSize, getFileIcon } from "@/shared/file-display"
 import { MemoriesTab } from "@/features/memories/components/memories-tab"
 import { FileViewerPanel } from "@/features/messaging/components/file-viewer-panel"
 import { useFileViewerStore } from "@/features/messaging/stores/file-viewer-store"
@@ -20,19 +21,6 @@ interface FileItem {
   url?: string
   source_type?: string
   created_at: string
-}
-
-const FILE_ICONS: Record<string, string> = {
-  pdf: "📕", doc: "📘", docx: "📘", xls: "📗", xlsx: "📗", csv: "📊",
-  png: "🖼️", jpg: "🖼️", jpeg: "🖼️", gif: "🖼️", svg: "🖼️",
-  ts: "🟦", tsx: "🟦", js: "🟨", jsx: "🟨", py: "🐍", go: "🔵", rs: "🦀",
-  zip: "📦", tar: "📦", gz: "📦", rar: "📦",
-  md: "📝", txt: "📝", json: "📝", yaml: "📝", yml: "📝",
-}
-
-function getIcon(name: string) {
-  const ext = name.split(".").pop()?.toLowerCase() ?? ""
-  return FILE_ICONS[ext] ?? "📄"
 }
 
 function FileVersionHistory({ fileId }: { fileId: string }) {
@@ -111,13 +99,6 @@ function FileVersionHistory({ fileId }: { fileId: string }) {
       ))}
     </div>
   )
-}
-
-function formatSize(bytes?: number) {
-  if (!bytes) return ""
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1048576).toFixed(1)} MB`
 }
 
 function timeAgo(dateStr: string) {
@@ -334,7 +315,7 @@ function FilesTab() {
                   <ChevronRight className="h-4 w-4" />
                 )}
               </button>
-              <span className="text-2xl shrink-0">{getIcon(f.file_name)}</span>
+              <span className="text-2xl shrink-0">{getFileIcon(f.file_name)}</span>
               <div className="flex-1 min-w-0">
                 <div className="font-medium truncate text-foreground text-[14px]">{f.file_name}</div>
                 <div className="text-[12px] text-muted-foreground flex items-center gap-2">
