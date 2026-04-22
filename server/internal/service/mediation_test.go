@@ -131,6 +131,55 @@ func TestMediationTimeoutContextExpires(t *testing.T) {
 	}
 }
 
+// TestMessageFromMap_AcceptsPointerStrings guards the message.created
+// payload shape: handler.messageToResponse encodes UUIDs via uuidToPtr
+// (*string) so that JSON null is emitted for absent values. A previous
+// regression had messageFromMap doing `v.(string)` which silently
+// dropped the channel_id, causing mediation to bail out of every
+// channel message.
+func TestMessageFromMap_AcceptsPointerStrings(t *testing.T) {
+	chID := "11111111-1111-1111-1111-111111111111"
+	thID := "22222222-2222-2222-2222-222222222222"
+	payload := map[string]any{
+		"id":          "33333333-3333-3333-3333-333333333333",
+		"sender_id":   "44444444-4444-4444-4444-444444444444",
+		"sender_type": "member",
+		"channel_id":  &chID,
+		"thread_id":   &thID,
+		"content":     "hi",
+		"content_type": "text",
+		"type":        "user",
+	}
+	msg := messageFromMap(payload, "55555555-5555-5555-5555-555555555555")
+	if !msg.ChannelID.Valid {
+		t.Fatalf("expected ChannelID valid, got zero")
+	}
+	if util.UUIDToString(msg.ChannelID) != chID {
+		t.Fatalf("channel_id mismatch: got %s", util.UUIDToString(msg.ChannelID))
+	}
+	if !msg.ThreadID.Valid || util.UUIDToString(msg.ThreadID) != thID {
+		t.Fatalf("thread_id mismatch: got %s valid=%v", util.UUIDToString(msg.ThreadID), msg.ThreadID.Valid)
+	}
+	// Nil pointer must not crash and must leave fields zero-valued.
+	var nilStr *string
+	payload["channel_id"] = nilStr
+	payload["thread_id"] = nilStr
+	msg2 := messageFromMap(payload, "55555555-5555-5555-5555-555555555555")
+	if msg2.ChannelID.Valid {
+		t.Fatalf("expected ChannelID invalid for nil *string")
+	}
+	if msg2.ThreadID.Valid {
+		t.Fatalf("expected ThreadID invalid for nil *string")
+	}
+	// Bare string still works (back-compat for in-process callers).
+	payload["channel_id"] = chID
+	payload["thread_id"] = thID
+	msg3 := messageFromMap(payload, "55555555-5555-5555-5555-555555555555")
+	if !msg3.ChannelID.Valid || !msg3.ThreadID.Valid {
+		t.Fatalf("bare-string payload regressed")
+	}
+}
+
 // newMessage inserts a member message into the channel.
 func (f *mediationFixture) newMemberMessage(ch db.Channel, content string) db.Message {
 	f.t.Helper()
