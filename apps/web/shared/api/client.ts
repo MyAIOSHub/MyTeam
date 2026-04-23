@@ -119,6 +119,11 @@ export class ApiClient implements ApiTransport {
 
   handleUnauthorized() {
     if (typeof window !== "undefined") {
+      // Current storage keys — match the auth store + live ASR client.
+      localStorage.removeItem("myteam_token");
+      localStorage.removeItem("myteam_workspace_id");
+      // Legacy keys from the pre-rename build; purge so long-running
+      // browser sessions don't keep a stale multica_* pair alongside.
       localStorage.removeItem("multica_token");
       localStorage.removeItem("multica_workspace_id");
       this.token = null;
