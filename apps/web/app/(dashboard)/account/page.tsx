@@ -406,6 +406,44 @@ function LocalAgentSetup({ onDone }: { onDone: () => void }) {
           所有在线 Runtime 都已绑定为本地 Agent。如需增加，请先添加新的 Runtime 或移除已有绑定。
         </div>
       )}
+
+      <details className="rounded-[6px] border border-border bg-secondary/30 px-3 py-2 text-[12px] text-muted-foreground" open={localRuntimes.length === 0}>
+        <summary className="cursor-pointer text-foreground font-medium">
+          如何创建本地 Runtime
+        </summary>
+        <div className="mt-2 space-y-2 leading-relaxed">
+          <div>本地 Runtime = 你本机跑着的 <code className="px-1 py-0.5 rounded bg-muted text-foreground">myteam daemon</code> + 至少一个 CLI（claude / codex / opencode）。daemon 自动探测可用 CLI 并上报成 Runtime。</div>
+
+          <div className="space-y-1">
+            <div className="text-foreground font-medium">1. 构建 myteam CLI</div>
+            <pre className="overflow-x-auto rounded bg-muted px-2 py-1.5 text-[11px] text-foreground">{`cd /path/to/MyTeam
+make build
+# 产物在 server/bin/myteam`}</pre>
+          </div>
+
+          <div className="space-y-1">
+            <div className="text-foreground font-medium">2. 指向当前后端 + 登录</div>
+            <pre className="overflow-x-auto rounded bg-muted px-2 py-1.5 text-[11px] text-foreground">{`export MYTEAM_APP_URL=http://localhost:3000
+export MYTEAM_SERVER_URL=ws://localhost:8080/ws
+./server/bin/myteam login
+# 按提示输入邮箱 + 验证码`}</pre>
+          </div>
+
+          <div className="space-y-1">
+            <div className="text-foreground font-medium">3. 启动 daemon（保持运行）</div>
+            <pre className="overflow-x-auto rounded bg-muted px-2 py-1.5 text-[11px] text-foreground">{`./server/bin/myteam daemon start
+./server/bin/myteam runtime list
+# 确认列出本机已装的 claude / codex / opencode`}</pre>
+          </div>
+
+          <div>
+            装完回到这里，点「刷新 Runtime」→ 上面的下拉框就会出现可选条目。
+            生产环境改用 <code className="px-1 py-0.5 rounded bg-muted text-foreground">https://myteam.ai</code> / <code className="px-1 py-0.5 rounded bg-muted text-foreground">https://api.myteam.ai</code>。
+            完整说明见「添加 Agent」标签页。
+          </div>
+        </div>
+      </details>
+
       <div className="flex flex-wrap gap-2">
         <button type="button" onClick={() => { void fetchRuntimes(); void refreshLocalAgents() }} disabled={fetching}
           className="px-4 py-2 border border-border rounded-[6px] text-[13px] font-medium disabled:opacity-40 hover:bg-secondary transition-colors">
