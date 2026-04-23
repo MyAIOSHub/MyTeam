@@ -64,7 +64,10 @@ export type WSEventType =
   | "channel:updated"
   | "thread:created"
   | "typing"
-  | "message:read";
+  | "message:read"
+  | "meeting:progress"
+  | "meeting:completed"
+  | "meeting:failed";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -247,4 +250,21 @@ export interface TaskProgressPayload {
   issue_id: string;
   progress: number; // 0-100
   message?: string;
+}
+
+export interface MeetingProgressPayload {
+  meeting_id: string;
+  task_id?: string;
+  attempt?: number;
+  elapsed_ms?: number;
+  doubao_status?: string;
+}
+
+export interface MeetingCompletedPayload {
+  meeting_id: string;
+}
+
+export interface MeetingFailedPayload {
+  meeting_id: string;
+  error?: string;
 }

@@ -14,18 +14,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/multica-ai/multica/server/internal/auth"
-	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/handler"
-	"github.com/multica-ai/multica/server/internal/middleware"
-	"github.com/multica-ai/multica/server/internal/realtime"
-	"github.com/multica-ai/multica/server/internal/service"
-	"github.com/multica-ai/multica/server/internal/service/asr"
-	"github.com/multica-ai/multica/server/internal/service/embed"
-	"github.com/multica-ai/multica/server/internal/service/memory"
-	"github.com/multica-ai/multica/server/internal/storage"
-	"github.com/multica-ai/multica/server/pkg/agent_runner"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/MyAIOSHub/MyTeam/server/internal/auth"
+	"github.com/MyAIOSHub/MyTeam/server/internal/events"
+	"github.com/MyAIOSHub/MyTeam/server/internal/handler"
+	"github.com/MyAIOSHub/MyTeam/server/internal/middleware"
+	"github.com/MyAIOSHub/MyTeam/server/internal/realtime"
+	"github.com/MyAIOSHub/MyTeam/server/internal/service"
+	"github.com/MyAIOSHub/MyTeam/server/internal/service/asr"
+	"github.com/MyAIOSHub/MyTeam/server/internal/service/embed"
+	"github.com/MyAIOSHub/MyTeam/server/internal/service/memory"
+	"github.com/MyAIOSHub/MyTeam/server/internal/storage"
+	"github.com/MyAIOSHub/MyTeam/server/pkg/agent_runner"
+	db "github.com/MyAIOSHub/MyTeam/server/pkg/db/generated"
 )
 
 func allowedOrigins() []string {
@@ -184,6 +184,14 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
 		realtime.HandleWebSocket(hub, mc, pr, ac, w, r)
 	})
+
+	// Live ASR WebSocket relay — browser streams 16kHz PCM, this
+	// endpoint bridges to Volcengine sauc bigmodel_async with speaker
+	// diarization. Lives at the root (not inside /api/*) because
+	// browser WebSocket constructors can't send an Authorization
+	// header; the handler authenticates via ?token= query param,
+	// mirroring the /ws auth pattern.
+	r.Get("/api/asr/stream", h.StreamLiveASR)
 
 	// Auth (public)
 	r.Post("/auth/send-code", h.SendCode)
