@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"sync"
 	"testing"
 )
@@ -541,5 +542,15 @@ func TestCodexProtocolDetectionLegacyBlocksRaw(t *testing.T) {
 
 	if len(messages) != messagesBefore {
 		t.Fatal("raw notification should be ignored in legacy mode")
+	}
+}
+
+func TestCodexAppServerArgsUseCurrentDefaultStdio(t *testing.T) {
+	t.Parallel()
+
+	got := codexAppServerArgs()
+	want := []string{"app-server"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("codex app-server args = %v, want %v", got, want)
 	}
 }
