@@ -37,7 +37,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { useAuthStore } from "@/features/auth";
-import { useWorkspaceManagement } from "@/features/workspace";
+import { useWorkspaceManagement } from "../hooks";
 import { getSettingsErrorMessage } from "@/shared/settings-error";
 
 const roleConfig: Record<MemberRole, { label: string; icon: typeof Crown; description: string }> = {
