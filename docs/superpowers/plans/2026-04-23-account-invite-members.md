@@ -169,7 +169,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { useAuthStore } from "@/features/auth";
-import { useWorkspaceManagement } from "@/features/workspace";
+import { useWorkspaceManagement } from "../hooks";
 import { getSettingsErrorMessage } from "@/shared/settings-error";
 
 const roleConfig: Record<MemberRole, { label: string; icon: typeof Crown; description: string }> = {
@@ -691,10 +691,11 @@ pnpm test
 git log --oneline main..HEAD
 ```
 
-期望看到 3 个原子 commit：
+期望看到 4 个原子 commit（Task 2 下方的 refactor fix 用于避免 MembersTab 内部对自身 barrel 的循环 import）：
 1. `refactor(web): move settings-error util to shared/`
 2. `refactor(web): move MembersTab to features/workspace`
-3. `feat(account): replace buggy hierarchy tab with members tab`
+3. `refactor(workspace): use relative import for useWorkspaceManagement in MembersTab`
+4. `feat(account): replace buggy hierarchy tab with members tab`
 
 ---
 
