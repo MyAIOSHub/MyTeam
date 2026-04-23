@@ -386,6 +386,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 			r.Route("/api/agents", func(r chi.Router) {
 				r.Get("/", h.ListAgents)
 				r.With(middleware.RequireWorkspaceRole(queries, "owner", "admin")).Post("/", h.CreateAgent)
+
+				// Local agents (daemon runtime backed). Each user can own
+				// N local_agents — one per registered local runtime.
+				r.Get("/local", h.ListLocalAgents)
+				r.Post("/local", h.CreateLocalAgent)
+				r.Delete("/local/{id}", h.ArchiveLocalAgent)
+
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)

@@ -11,6 +11,96 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const archiveLocalAgent = `-- name: ArchiveLocalAgent :exec
+UPDATE agent
+SET archived_at = NOW(), archived_by = $2
+WHERE id = $1
+  AND agent_type = 'local_agent'
+  AND archived_at IS NULL
+`
+
+type ArchiveLocalAgentParams struct {
+	ID         pgtype.UUID `json:"id"`
+	ArchivedBy pgtype.UUID `json:"archived_by"`
+}
+
+func (q *Queries) ArchiveLocalAgent(ctx context.Context, arg ArchiveLocalAgentParams) error {
+	_, err := q.db.Exec(ctx, archiveLocalAgent, arg.ID, arg.ArchivedBy)
+	return err
+}
+
+const createLocalAgent = `-- name: CreateLocalAgent :one
+INSERT INTO agent (
+    workspace_id, name, description,
+    runtime_id, visibility, status, max_concurrent_tasks, owner_id,
+    agent_type, owner_type, auto_reply_enabled
+) VALUES ($1, $2, $3, $4, 'private', 'idle', 1, $5, 'local_agent', 'user', TRUE)
+RETURNING
+    id, workspace_id, name, avatar_url, visibility, status,
+    max_concurrent_tasks, owner_id, created_at, updated_at, description,
+    runtime_id, instructions, archived_at, archived_by,
+    auto_reply_enabled, auto_reply_config, display_name, avatar, bio, tags,
+    trigger_on_channel_mention, needs_attention, needs_attention_reason,
+    agent_type, identity_card, last_active_at, scope, owner_type,
+    kind, is_global, source, source_ref, category
+`
+
+type CreateLocalAgentParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	RuntimeID   pgtype.UUID `json:"runtime_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+}
+
+func (q *Queries) CreateLocalAgent(ctx context.Context, arg CreateLocalAgentParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, createLocalAgent,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Description,
+		arg.RuntimeID,
+		arg.OwnerID,
+	)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.AutoReplyEnabled,
+		&i.AutoReplyConfig,
+		&i.DisplayName,
+		&i.Avatar,
+		&i.Bio,
+		&i.Tags,
+		&i.TriggerOnChannelMention,
+		&i.NeedsAttention,
+		&i.NeedsAttentionReason,
+		&i.AgentType,
+		&i.IdentityCard,
+		&i.LastActiveAt,
+		&i.Scope,
+		&i.OwnerType,
+		&i.Kind,
+		&i.IsGlobal,
+		&i.Source,
+		&i.SourceRef,
+		&i.Category,
+	)
+	return i, err
+}
+
 const createPageSystemAgent = `-- name: CreatePageSystemAgent :one
 INSERT INTO agent (workspace_id, name, description, instructions, status, owner_type, visibility, agent_type, scope, runtime_id)
 VALUES ($1, $2, $3, $4, 'idle', 'organization', 'workspace', 'system_agent', $5, $6)
@@ -349,6 +439,30 @@ func (q *Queries) GetAutoReplyAgents(ctx context.Context, workspaceID pgtype.UUI
 	return items, nil
 }
 
+const getLocalAgentByOwnerRuntime = `-- name: GetLocalAgentByOwnerRuntime :one
+SELECT id
+FROM agent
+WHERE workspace_id = $1
+  AND owner_id = $2
+  AND runtime_id = $3
+  AND agent_type = 'local_agent'
+  AND archived_at IS NULL
+LIMIT 1
+`
+
+type GetLocalAgentByOwnerRuntimeParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+	RuntimeID   pgtype.UUID `json:"runtime_id"`
+}
+
+func (q *Queries) GetLocalAgentByOwnerRuntime(ctx context.Context, arg GetLocalAgentByOwnerRuntimeParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getLocalAgentByOwnerRuntime, arg.WorkspaceID, arg.OwnerID, arg.RuntimeID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getPageSystemAgent = `-- name: GetPageSystemAgent :one
 SELECT
     id, workspace_id, name, avatar_url, visibility, status,
@@ -541,6 +655,83 @@ FROM agent WHERE archived_at IS NULL ORDER BY created_at ASC
 
 func (q *Queries) ListAllAgentsGlobal(ctx context.Context) ([]Agent, error) {
 	rows, err := q.db.Query(ctx, listAllAgentsGlobal)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.AutoReplyEnabled,
+			&i.AutoReplyConfig,
+			&i.DisplayName,
+			&i.Avatar,
+			&i.Bio,
+			&i.Tags,
+			&i.TriggerOnChannelMention,
+			&i.NeedsAttention,
+			&i.NeedsAttentionReason,
+			&i.AgentType,
+			&i.IdentityCard,
+			&i.LastActiveAt,
+			&i.Scope,
+			&i.OwnerType,
+			&i.Kind,
+			&i.IsGlobal,
+			&i.Source,
+			&i.SourceRef,
+			&i.Category,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLocalAgentsByOwner = `-- name: ListLocalAgentsByOwner :many
+SELECT
+    id, workspace_id, name, avatar_url, visibility, status,
+    max_concurrent_tasks, owner_id, created_at, updated_at, description,
+    runtime_id, instructions, archived_at, archived_by,
+    auto_reply_enabled, auto_reply_config, display_name, avatar, bio, tags,
+    trigger_on_channel_mention, needs_attention, needs_attention_reason,
+    agent_type, identity_card, last_active_at, scope, owner_type,
+    kind, is_global, source, source_ref, category
+FROM agent
+WHERE workspace_id = $1
+  AND owner_id = $2
+  AND agent_type = 'local_agent'
+  AND archived_at IS NULL
+ORDER BY created_at ASC
+`
+
+type ListLocalAgentsByOwnerParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+}
+
+func (q *Queries) ListLocalAgentsByOwner(ctx context.Context, arg ListLocalAgentsByOwnerParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listLocalAgentsByOwner, arg.WorkspaceID, arg.OwnerID)
 	if err != nil {
 		return nil, err
 	}

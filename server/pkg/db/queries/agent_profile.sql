@@ -142,3 +142,51 @@ RETURNING
     trigger_on_channel_mention, needs_attention, needs_attention_reason,
     agent_type, identity_card, last_active_at, scope, owner_type,
     kind, is_global, source, source_ref, category;
+
+-- name: CreateLocalAgent :one
+INSERT INTO agent (
+    workspace_id, name, description,
+    runtime_id, visibility, status, max_concurrent_tasks, owner_id,
+    agent_type, owner_type, auto_reply_enabled
+) VALUES ($1, $2, $3, $4, 'private', 'idle', 1, $5, 'local_agent', 'user', TRUE)
+RETURNING
+    id, workspace_id, name, avatar_url, visibility, status,
+    max_concurrent_tasks, owner_id, created_at, updated_at, description,
+    runtime_id, instructions, archived_at, archived_by,
+    auto_reply_enabled, auto_reply_config, display_name, avatar, bio, tags,
+    trigger_on_channel_mention, needs_attention, needs_attention_reason,
+    agent_type, identity_card, last_active_at, scope, owner_type,
+    kind, is_global, source, source_ref, category;
+
+-- name: ListLocalAgentsByOwner :many
+SELECT
+    id, workspace_id, name, avatar_url, visibility, status,
+    max_concurrent_tasks, owner_id, created_at, updated_at, description,
+    runtime_id, instructions, archived_at, archived_by,
+    auto_reply_enabled, auto_reply_config, display_name, avatar, bio, tags,
+    trigger_on_channel_mention, needs_attention, needs_attention_reason,
+    agent_type, identity_card, last_active_at, scope, owner_type,
+    kind, is_global, source, source_ref, category
+FROM agent
+WHERE workspace_id = $1
+  AND owner_id = $2
+  AND agent_type = 'local_agent'
+  AND archived_at IS NULL
+ORDER BY created_at ASC;
+
+-- name: GetLocalAgentByOwnerRuntime :one
+SELECT id
+FROM agent
+WHERE workspace_id = $1
+  AND owner_id = $2
+  AND runtime_id = $3
+  AND agent_type = 'local_agent'
+  AND archived_at IS NULL
+LIMIT 1;
+
+-- name: ArchiveLocalAgent :exec
+UPDATE agent
+SET archived_at = NOW(), archived_by = $2
+WHERE id = $1
+  AND agent_type = 'local_agent'
+  AND archived_at IS NULL;
