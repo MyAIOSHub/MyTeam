@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -109,7 +110,7 @@ func SanitizeFilename(name string) string {
 }
 
 // KeyFromURL extracts the S3 object key from a CDN or bucket URL.
-// e.g. "https://multica-static.copilothub.ai/abc123.png" → "abc123.png"
+// e.g. "https://myteam-static.copilothub.ai/abc123.png" → "abc123.png"
 func (s *S3Storage) KeyFromURL(rawURL string) string {
 	// Strip the "https://domain/" prefix.
 	for _, prefix := range []string{
@@ -125,6 +126,21 @@ func (s *S3Storage) KeyFromURL(rawURL string) string {
 		return rawURL[i+1:]
 	}
 	return rawURL
+}
+
+// PresignGet returns a time-limited HTTPS GET URL for the object. Used
+// to hand out temporary read access to external services (e.g. Doubao
+// 妙记) that need to fetch the audio without our AK/SK.
+func (s *S3Storage) PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	presigner := s3.NewPresignClient(s.client)
+	req, err := presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	}, s3.WithPresignExpires(ttl))
+	if err != nil {
+		return "", fmt.Errorf("s3 presign GetObject: %w", err)
+	}
+	return req.URL, nil
 }
 
 // Download streams an object from S3/TOS. Callers must Close the body.
